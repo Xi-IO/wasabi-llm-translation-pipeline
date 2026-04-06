@@ -1,0 +1,33 @@
+{
+    "main": "bot.js",
+    "type": "module",
+    "dependencies": {
+        "@google/generative-ai": "^0.24.1",
+        "adm-zip": "^0.5.16",
+        "async-mutex": "^0.5.0",
+        "better-queue": "^3.8.12",
+        "cheerio": "^1.2.0",
+        "dotenv": "^17.3.1",
+        "epub2": "^3.0.2",
+        "grammy": "^1.38.4",
+        "jieba-wasm": "^2.4.0",
+        "natural": "^8.1.0",
+        "node-epub": "^1.0.0-beta.5",
+        "node-fetch": "^3.3.2",
+        "nodepub": "^3.2.1",
+        "openai": "^6.33.0",
+        "p-limit": "^7.2.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.9.3"
+    },
+    "name": "wasabi_mkv",
+    "version": "1.0.0",
+    "description": "",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC"
+}
