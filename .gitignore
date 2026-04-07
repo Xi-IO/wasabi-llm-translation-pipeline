@@ -1,0 +1,45 @@
+# --- 依赖与环境 (必留) ---
+node_modules/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- 视频与字幕原始文件 (你的多媒体隔离) ---
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.flv
+*.srt
+*.ass
+*.vtt
+
+# --- 运行生成的缓存与临时文件 (重点！) ---
+# 过滤掉类似 Ruby.Sparks.2012...translate-cache.json 的文件
+*translate-cache.json
+*.tmp
+*.temp
+/temp/
+
+# --- 电子书相关 (如果你本地还在测试这个) ---
+*.epub
+*.mobi
+*.azw3
+*.pdf
+
+# --- 日志与缓存 ---
+/logs/
+*.log
+npm-debug.log*
+.cache/
+.cache*
+
+# --- 系统与编辑器残留 ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+*.zip
