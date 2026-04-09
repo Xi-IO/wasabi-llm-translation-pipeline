@@ -81,7 +81,7 @@ Fill in your API key in `.env`.
 
 ## Usage
 
-`node ./index(1).js <input_file>`
+`node index.js <input_file>`
 
 **Supported input formats:**
 - Video files with subtitles: `.mkv`, `.mp4`, `.avi`, `.mov`, `.flv`
