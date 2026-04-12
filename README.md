@@ -118,7 +118,7 @@ node index.js "english_subtitles.srt" --to es
 **Output:**
 - **Video input (.mkv)**: 
   - Translated subtitle file: `output/<video_name>/<video_name>.<lang_suffix>.srt`
-  - New video with embedded subtitles: `output/<video_name>/<video_name>.zh.mkv`
+  - New video with embedded subtitles: `output/<video_name>/<video_name>.<lang_suffix>.mkv`
   
 - **Subtitle input (.srt/.ass)**: 
   - Translated subtitle file: `output/<subtitle_name>/<subtitle_name>.<lang_suffix>.srt` (or `.ass`)
@@ -131,7 +131,7 @@ input/
 output/
   ├─ <filename>/
   │  ├─ <filename>.<lang_suffix>.srt  (translated subtitles)
-  │  └─ <filename>.zh.mkv  (remuxed video, only for video input)
+  │  └─ <filename>.<lang_suffix>.mkv  (remuxed video, only for video input)
 cache/
   └─ (auto-deleted after completion)
 temp/

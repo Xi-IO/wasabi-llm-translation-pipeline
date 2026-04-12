@@ -1,7 +1,8 @@
 import "dotenv/config";
 import fs from "fs/promises";
 
-import { parseCliArgs, languageLabel, targetSuffix } from "./src/cli/args.js";
+import { parseCliArgs, targetSuffix } from "./src/cli/args.js";
+import { languageLabel } from "./src/config/runtime.js";
 import { muxSubtitle } from "./src/media/ffmpeg.js";
 import { collectTranslatableItems, applyTranslations } from "./src/subtitles/translation-items.js";
 import { parseByFormat } from "./src/subtitles/format-dispatcher.js";
@@ -44,7 +45,7 @@ async function main() {
   console.log(`缓存文件: ${cachePath}`);
 
   if (isMkv) {
-    await muxSubtitle(workspace.inputPath, translatedPath, outputMkv);
+    await muxSubtitle(workspace.inputPath, translatedPath, outputMkv, langOptions.to);
     console.log(`已封装: ${outputMkv}`);
   }
 

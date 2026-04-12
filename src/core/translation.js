@@ -1,8 +1,7 @@
 import fs from "fs/promises";
 import OpenAI from "openai";
-import { CONFIG } from "../config/runtime.js";
+import { CONFIG, languageLabel } from "../config/runtime.js";
 import { sleep } from "../utils/system.js";
-import { languageLabel } from "../cli/args.js";
 
 const PROMPT_PATH = new URL("../../prompts/subtitle_system.txt", import.meta.url);
 

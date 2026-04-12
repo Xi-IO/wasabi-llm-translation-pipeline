@@ -70,9 +70,22 @@ export async function countSubtitleStreams(inputPath) {
   return streams.filter((s) => s.codec_type === "subtitle").length;
 }
 
-export async function muxSubtitle(inputPath, subtitlePath, outputPath) {
+function toFfmpegLanguageCode(langCode) {
+  const normalized = String(langCode || "").toLowerCase();
+  if (normalized.startsWith("zh")) return "chi";
+  if (normalized.startsWith("en")) return "eng";
+  if (normalized.startsWith("fr")) return "fre";
+  if (normalized.startsWith("ru")) return "rus";
+  if (normalized.startsWith("ja")) return "jpn";
+  if (normalized.startsWith("ko")) return "kor";
+  if (normalized.startsWith("es")) return "spa";
+  return "und";
+}
+
+export async function muxSubtitle(inputPath, subtitlePath, outputPath, targetLanguageCode = "zh-CN") {
   const subtitleCount = await countSubtitleStreams(inputPath);
   const newSubtitleIndex = subtitleCount;
+  const ffmpegLanguage = toFfmpegLanguageCode(targetLanguageCode);
 
   const args = [
     "-y",
@@ -89,7 +102,7 @@ export async function muxSubtitle(inputPath, subtitlePath, outputPath) {
   }
 
   args.push(
-    `-metadata:s:s:${newSubtitleIndex}`, "language=chi",
+    `-metadata:s:s:${newSubtitleIndex}`, `language=${ffmpegLanguage}`,
     `-disposition:s:${newSubtitleIndex}`, "default",
     outputPath,
   );

@@ -1,4 +1,4 @@
-import { CONFIG, LANGUAGE_LABELS } from "../config/runtime.js";
+import { CONFIG } from "../config/runtime.js";
 
 export function normalizeLangCode(value, fallback) {
   if (!value) return fallback.toLowerCase();
@@ -43,10 +43,6 @@ export function parseCliArgs(argv) {
   }
 
   return { input, opts };
-}
-
-export function languageLabel(lang) {
-  return LANGUAGE_LABELS[lang] || lang;
 }
 
 export function targetSuffix(lang) {

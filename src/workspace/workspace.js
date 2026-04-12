@@ -44,7 +44,9 @@ export function buildJobPaths(workspace, format, targetLangSuffix) {
   const cachePath = path.resolve(
     path.join(workspace.cacheDir, `${workspace.baseName}.translate-cache.json`),
   );
-  const outputMkv = path.resolve(path.join(workspace.outputSubDir, `${workspace.baseName}.zh.mkv`));
+  const outputMkv = path.resolve(
+    path.join(workspace.outputSubDir, `${workspace.baseName}.${targetLangSuffix}.mkv`),
+  );
 
   return { translatedPath, cachePath, outputMkv };
 }

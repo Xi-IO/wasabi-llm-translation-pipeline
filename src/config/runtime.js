@@ -24,3 +24,7 @@ export const LANGUAGE_LABELS = {
   es: "Spanish",
   "es-es": "Spanish (es-ES)",
 };
+
+export function languageLabel(lang) {
+  return LANGUAGE_LABELS[lang] || lang;
+}
