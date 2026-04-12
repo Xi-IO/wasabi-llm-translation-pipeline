@@ -43,14 +43,80 @@ function getProviderConfig() {
 // =========================
 const CONFIG = {
   provider: getProviderConfig(),
-  targetLanguage: "简体中文",
+  defaultSourceLanguage: "auto",
+  defaultTargetLanguage: "zh-CN",
   maxBatchItems: 40,
   maxBatchChars: 5000,
   retry: 3,
-  outputSuffix: "zh",
   preferredEnglishTags: ["eng", "en", "english"],
   textSubtitleCodecs: new Set(["subrip", "ass", "ssa", "webvtt", "mov_text"]),
 };
+
+const LANGUAGE_LABELS = {
+  auto: "Auto-detect",
+  "zh-cn": "Simplified Chinese (zh-CN)",
+  "zh-hans": "Simplified Chinese (zh-Hans)",
+  en: "English",
+  fr: "French",
+  ru: "Russian",
+  ja: "Japanese",
+  ko: "Korean",
+  "ko-kr": "Korean (ko-KR)",
+  es: "Spanish",
+  "es-es": "Spanish (es-ES)",
+};
+
+function normalizeLangCode(value, fallback) {
+  if (!value) return fallback.toLowerCase();
+  return String(value).trim().replace("_", "-").toLowerCase();
+}
+
+function parseCliArgs(argv) {
+  const args = [...argv];
+  const opts = {
+    from: CONFIG.defaultSourceLanguage,
+    to: CONFIG.defaultTargetLanguage,
+  };
+  let input = null;
+
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i];
+
+    if (token === "--from") {
+      opts.from = args[++i];
+      continue;
+    }
+    if (token === "--to") {
+      opts.to = args[++i];
+      continue;
+    }
+    if (token.startsWith("--")) {
+      throw new Error(`Unknown option: ${token}`);
+    }
+    if (!input) input = token;
+    else throw new Error(`Unexpected extra positional argument: ${token}`);
+  }
+
+  if (!input) {
+    throw new Error("用法: node index.js <input_file> [--to zh-CN] [--from auto]");
+  }
+
+  opts.from = normalizeLangCode(opts.from, CONFIG.defaultSourceLanguage);
+  opts.to = normalizeLangCode(opts.to, CONFIG.defaultTargetLanguage);
+  if (opts.to === "auto") {
+    throw new Error("--to 不能是 auto，请指定目标语言（例如 zh-CN / fr / ru / ja / ko / es）。");
+  }
+
+  return { input, opts };
+}
+
+function languageLabel(lang) {
+  return LANGUAGE_LABELS[lang] || lang;
+}
+
+function targetSuffix(lang) {
+  return lang.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+}
 
 // =========================
 // 基础工具
@@ -381,8 +447,8 @@ function createClient() {
   });
 }
 
-function buildMessages(batch) {
-  const systemPrompt = `You are a subtitle translator. Translate English subtitles into natural, context-aware Simplified Chinese.
+function buildMessages(batch, langOptions) {
+  const systemPrompt = `You are a subtitle translator. Translate subtitles from ${languageLabel(langOptions.from)} into natural, context-aware ${languageLabel(langOptions.to)}.
 Style: Choose appropriate register (colloquial/formal/literary/archaic). Preserve tone, attitude, intensity. Translate profanity faithfully.
 Strict rules: 1. Preserve item count exactly 2. Preserve each id exactly 3. Do not merge/split items 4. Output ONLY valid JSON array 5. No markdown/explanations 6. Format: [{"id":"...","translation":"..."}] 7. Valid JSON strings only 8. No unescaped line breaks
 Return ONLY the JSON array.`;
@@ -400,8 +466,8 @@ function extractJsonArray(text) {
   return match;
 }
 
-async function translateBatch(client, batch) {
-  const messages = buildMessages(batch);
+async function translateBatch(client, batch, langOptions) {
+  const messages = buildMessages(batch, langOptions);
   const completion = await client.chat.completions.create({
     model: CONFIG.provider.model,
     messages,
@@ -418,7 +484,7 @@ async function translateBatch(client, batch) {
   }));
 }
 
-async function translateAll(items, cachePath) {
+async function translateAll(items, cachePath, langOptions) {
   const client = createClient();
   const existing = await cache.load(cachePath);
   const done = new Map(Object.entries(existing));
@@ -431,7 +497,7 @@ async function translateAll(items, cachePath) {
     let success = false;
     for (let attempt = 1; attempt <= CONFIG.retry; attempt++) {
       try {
-        const translated = await translateBatch(client, batches[i]);
+        const translated = await translateBatch(client, batches[i], langOptions);
         for (const row of translated) done.set(row.key, row.translation);
         await cache.save(cachePath, Object.fromEntries(done));
         console.log(`批次 ${i + 1}/${batches.length} 完成`);
@@ -518,13 +584,9 @@ async function muxSubtitle(inputPath, subtitlePath, outputPath) {
 // 主流程
 // =========================
 async function main() {
-  const inputArg = process.argv[2];
-  if (!inputArg) {
-    console.error("用法: 把文件拖到脚本上，或执行 node index(1).js your_file.mkv/.srt/.ass");
-    process.exit(1);
-  }
+  const { input, opts: langOptions } = parseCliArgs(process.argv.slice(2));
 
-  const inputPath = path.resolve(inputArg);
+  const inputPath = path.resolve(input);
   const fileName = path.basename(inputPath);
   const baseName = path.parse(fileName).name;
   const fileExt = path.extname(fileName).toLowerCase();
@@ -558,6 +620,7 @@ async function main() {
 
   const inputMkvPath = inputPath;
   console.log(`输入文件: ${inputMkvPath}`);
+  console.log(`翻译方向: ${languageLabel(langOptions.from)} -> ${languageLabel(langOptions.to)}`);
 
   let format;
   let rawText;
@@ -600,7 +663,7 @@ async function main() {
 
   // 定义输出路径
   const outputExt = format === "srt" ? ".srt" : format;
-  const translatedPath = path.resolve(path.join(outputSubDir, `${baseName}.${CONFIG.outputSuffix}${outputExt}`));
+  const translatedPath = path.resolve(path.join(outputSubDir, `${baseName}.${targetSuffix(langOptions.to)}${outputExt}`));
   const cachePath = path.resolve(path.join(cacheDir, `${baseName}.translate-cache.json`));
 
   let parsed;
@@ -612,7 +675,7 @@ async function main() {
     throw new Error("没有找到可翻译的文本条目。");
   }
 
-  const translationMap = await translateAll(items, cachePath);
+  const translationMap = await translateAll(items, cachePath, langOptions);
   const finalText = applyTranslations(format, parsed, translationMap);
   await fs.writeFile(translatedPath, finalText, "utf8");
 
