@@ -81,7 +81,7 @@ Fill in your API key in `.env`.
 
 ## Usage
 
-`node index.js <input_file> [--to target_lang] [--from source_lang]`
+`node index.js <input_file> [--to target_lang] [--from source_lang] [--concurrency 4]`
 
 If you omit language options, the default is:
 `node index.js <input_file> --to zh-CN`
@@ -94,6 +94,7 @@ If you omit language options, the default is:
 **Language options:**
 - `--to`: target language (default: `zh-CN`)
 - `--from`: source language (default: `auto`, model decides)
+- `--concurrency`: set request concurrency for this run (default from env `TRANSLATION_CONCURRENCY`, fallback `4`)
 - `--verbose-failures`: print more per-node details on batch failures/retries
 - Common target language examples: `zh-CN`, `fr`, `ru`, `ja`, `ko`, `es`
 
@@ -111,6 +112,9 @@ node index.js "subtitles.ass"
 
 # EPUB file → output translated EPUB
 node index.js "book.epub"
+
+# Use 4 concurrent translation requests in this run
+node index.js "book.epub" --concurrency 4
 
 # Set target language (e.g. Japanese)
 node index.js "english_subtitles.srt" --to ja

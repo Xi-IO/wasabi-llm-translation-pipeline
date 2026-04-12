@@ -98,6 +98,16 @@ export async function createRunLogger({
         ...payload,
       });
     },
+    async logUnresolvedNode(payload) {
+      await appendRunFailureLog(runLogPath, {
+        timestamp: nowIso(),
+        type: "unresolved-node",
+        inputFile,
+        provider,
+        model,
+        ...payload,
+      });
+    },
     async finalize({ success, summary = {}, reason = null }) {
       return finalizeRunLog(runLogPath, { success, summary, reason });
     },
