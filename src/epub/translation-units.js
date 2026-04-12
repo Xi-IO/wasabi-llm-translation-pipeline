@@ -1,4 +1,23 @@
-const BLOCK_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote"]);
+const BLOCK_TAGS = new Set([
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "p",
+  "li",
+  "blockquote",
+  "div",
+  "section",
+  "article",
+  "figcaption",
+  "caption",
+  "td",
+  "th",
+  "dt",
+  "dd",
+]);
 const NEVER_TRANSLATE_TAGS = new Set(["script", "style", "code", "pre"]);
 
 const TOKEN_OPEN = "[[[";
@@ -143,6 +162,7 @@ export function extractTranslationUnits(chapter, diagnostics = null) {
         }
       } else {
         incrementReason(stats.skippedReasons, "nested-block-structure");
+        for (const child of node.children || []) walk(child);
       }
       return;
     }

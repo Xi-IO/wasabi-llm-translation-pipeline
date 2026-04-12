@@ -242,12 +242,13 @@ test("epub: non-block nested tags are preserved while text is still translated",
   assert.equal(html.includes("<p>译:Hello <span>译:world</span></p>"), true);
 });
 
-test("epub: nested block structures are skipped conservatively", () => {
+test("epub: nested block container is skipped but child block still extracted", () => {
   const chapter = makeChapter("<html><body><ul><li>outer<p>inner</p></li></ul></body></html>");
   const diagnostics = {};
   const units = extractTranslationUnits(chapter, diagnostics);
-  assert.equal(units.length, 0);
-  assert.equal(diagnostics.blockCandidates, 1);
+  assert.equal(units.length, 1);
+  assert.equal(units[0].kind, "p");
+  assert.equal(diagnostics.blockCandidates >= 2, true);
   assert.equal(diagnostics.skippedReasons["nested-block-structure"], 1);
 });
 
@@ -259,6 +260,13 @@ test("epub: extraction diagnostics count empty-text skips", () => {
   assert.equal(diagnostics.blockCandidates, 2);
   assert.equal(diagnostics.producedUnits, 1);
   assert.equal(diagnostics.skippedReasons["empty-text"], 1);
+});
+
+test("epub: div containers can be extracted as translatable blocks", () => {
+  const chapter = makeChapter("<html><body><div>Paragraph in div.</div></body></html>");
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+  assert.equal(units[0].kind, "div");
 });
 
 test("epub: reconstructed chapter remains parseable and mapping remains 1:1", () => {
