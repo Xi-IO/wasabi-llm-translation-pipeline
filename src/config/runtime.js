@@ -4,6 +4,7 @@ export const CONFIG = {
   provider: getProviderConfig(),
   defaultSourceLanguage: "auto",
   defaultTargetLanguage: "zh-CN",
+  translationConcurrency: Number(process.env.TRANSLATION_CONCURRENCY || 4),
   maxBatchItems: 40,
   maxBatchChars: 5000,
   retry: 3,

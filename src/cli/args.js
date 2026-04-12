@@ -10,6 +10,7 @@ export function parseCliArgs(argv) {
   const opts = {
     from: CONFIG.defaultSourceLanguage,
     to: CONFIG.defaultTargetLanguage,
+    verboseFailures: false,
   };
   let input = null;
 
@@ -24,6 +25,10 @@ export function parseCliArgs(argv) {
       opts.to = args[++i];
       continue;
     }
+    if (token === "--verbose-failures") {
+      opts.verboseFailures = true;
+      continue;
+    }
     if (token.startsWith("--")) {
       throw new Error(`Unknown option: ${token}`);
     }
@@ -32,7 +37,7 @@ export function parseCliArgs(argv) {
   }
 
   if (!input) {
-    throw new Error("用法: node index.js <input_file> [--to zh-CN] [--from auto]");
+    throw new Error("用法: node index.js <input_file> [--to zh-CN] [--from auto] [--verbose-failures]");
   }
 
   opts.from = normalizeLangCode(opts.from, CONFIG.defaultSourceLanguage);

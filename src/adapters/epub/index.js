@@ -22,8 +22,9 @@ export function applyEpubTranslations(epubDoc, translationMap) {
   return epubDoc;
 }
 
-export async function translateEpubItems(items, cachePath, langOptions) {
+export async function translateEpubItems(items, cachePath, langOptions, options = {}) {
   return translateAll(items, cachePath, langOptions, {
     promptPath: DEFAULT_EPUB_PROMPT_PATH,
+    ...options,
   });
 }

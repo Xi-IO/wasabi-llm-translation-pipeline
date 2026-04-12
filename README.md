@@ -94,7 +94,11 @@ If you omit language options, the default is:
 **Language options:**
 - `--to`: target language (default: `zh-CN`)
 - `--from`: source language (default: `auto`, model decides)
+- `--verbose-failures`: print more per-node details on batch failures/retries
 - Common target language examples: `zh-CN`, `fr`, `ru`, `ja`, `ko`, `es`
+
+**Concurrency config (env):**
+- `TRANSLATION_CONCURRENCY`: batch translation concurrency (default `4`)
 
 **Examples:**
 ```bash
