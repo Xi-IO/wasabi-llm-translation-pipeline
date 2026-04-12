@@ -120,7 +120,7 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
   const pending = items.filter((x) => !done.has(x.key));
   const batches = makeBatches(pending);
   const cacheMutex = new Mutex();
-  const concurrency = Math.max(1, CONFIG.translationConcurrency || 1);
+  const concurrency = Math.max(1, Number(options.concurrency ?? CONFIG.translationConcurrency) || 1);
 
   console.log(`待翻译条目: ${pending.length}\n批次数: ${batches.length}\n并发度: ${concurrency}`);
 

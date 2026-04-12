@@ -48,6 +48,7 @@ async function main() {
         targetSuffix(langOptions.to),
       );
       const translationMap = await translateEpubItems(items, cachePath, langOptions, {
+        concurrency: langOptions.concurrency,
         runLogger,
         verboseFailures: runLogger.verboseFailures,
         runSummary,
@@ -73,6 +74,7 @@ async function main() {
       }
 
       const translationMap = await translateAll(items, cachePath, langOptions, {
+        concurrency: langOptions.concurrency,
         runLogger,
         verboseFailures: runLogger.verboseFailures,
         runSummary,
