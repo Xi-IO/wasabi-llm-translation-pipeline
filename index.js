@@ -60,6 +60,10 @@ const LANGUAGE_LABELS = {
   fr: "French",
   ru: "Russian",
   ja: "Japanese",
+  ko: "Korean",
+  "ko-kr": "Korean (ko-KR)",
+  es: "Spanish",
+  "es-es": "Spanish (es-ES)",
 };
 
 function normalizeLangCode(value, fallback) {
@@ -100,7 +104,7 @@ function parseCliArgs(argv) {
   opts.from = normalizeLangCode(opts.from, CONFIG.defaultSourceLanguage);
   opts.to = normalizeLangCode(opts.to, CONFIG.defaultTargetLanguage);
   if (opts.to === "auto") {
-    throw new Error("--to 不能是 auto，请指定目标语言（例如 zh-CN / fr / ru / ja）。");
+    throw new Error("--to 不能是 auto，请指定目标语言（例如 zh-CN / fr / ru / ja / ko / es）。");
   }
 
   return { input, opts };

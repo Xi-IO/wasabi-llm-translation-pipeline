@@ -93,6 +93,7 @@ If you omit language options, the default is:
 **Language options:**
 - `--to`: target language (default: `zh-CN`)
 - `--from`: source language (default: `auto`, model decides)
+- Common target language examples: `zh-CN`, `fr`, `ru`, `ja`, `ko`, `es`
 
 **Examples:**
 ```bash
@@ -108,6 +109,10 @@ node index.js "english_subtitles.srt" --to ja
 
 # French -> Russian
 node index.js "subtitles.ass" --from fr --to ru
+
+# Target language: Korean / Spanish
+node index.js "english_subtitles.srt" --to ko
+node index.js "english_subtitles.srt" --to es
 ```
 
 **Output:**
