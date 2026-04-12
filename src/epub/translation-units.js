@@ -1,5 +1,4 @@
 const BLOCK_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote"]);
-const INLINE_TAGS = new Set(["em", "i", "strong", "b", "a"]);
 const NEVER_TRANSLATE_TAGS = new Set(["script", "style", "code", "pre"]);
 
 const TOKEN_OPEN = "[[[";
@@ -33,13 +32,12 @@ function collectNodeIndex(root) {
   return index;
 }
 
-function hasUnsupportedNestedStructure(blockNode) {
+function hasNestedBlockStructure(blockNode) {
   function walk(node, isRoot = false) {
     if (node.type !== "element") return false;
     if (NEVER_TRANSLATE_TAGS.has(node.tagName)) return false;
 
     if (!isRoot && BLOCK_TAGS.has(node.tagName)) return true;
-    if (!isRoot && !INLINE_TAGS.has(node.tagName)) return true;
 
     return (node.children || []).some((child) => walk(child, false));
   }
@@ -115,7 +113,7 @@ export function extractTranslationUnits(chapter) {
     }
 
     if (BLOCK_TAGS.has(node.tagName)) {
-      if (!hasUnsupportedNestedStructure(node)) {
+      if (!hasNestedBlockStructure(node)) {
         const textNodes = collectTextNodes(node);
         if (textNodes.length > 0) {
           const { protectedSourceText, placeholderMap } = buildProtectedText(textNodes);

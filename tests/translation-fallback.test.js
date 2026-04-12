@@ -228,16 +228,24 @@ test("epub: heading tags keep structure after translation", () => {
   assert.equal(html.includes("<h2>译:Chapter Title</h2>"), true);
 });
 
-test("epub: unsupported nested tags are preserved conservatively", () => {
+test("epub: non-block nested tags are preserved while text is still translated", () => {
   const source = "<html><body><p>Hello <span>world</span></p></body></html>";
   const chapter = makeChapter(source);
   const units = extractTranslationUnits(chapter);
-  assert.equal(units.length, 0);
-
-  applyTranslationUnits(chapter, {}, units);
+  assert.equal(units.length, 1);
+  const translationMap = {
+    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+  };
+  applyTranslationUnits(chapter, translationMap, units);
   const html = renderDocument(chapter.document);
-  assert.equal(html.includes("<span>world</span>"), true);
-  assert.equal(html.includes("<p>Hello <span>world</span></p>"), true);
+  assert.equal(html.includes("<span>译:world</span>"), true);
+  assert.equal(html.includes("<p>译:Hello <span>译:world</span></p>"), true);
+});
+
+test("epub: nested block structures are skipped conservatively", () => {
+  const chapter = makeChapter("<html><body><ul><li>outer<p>inner</p></li></ul></body></html>");
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 0);
 });
 
 test("epub: reconstructed chapter remains parseable and mapping remains 1:1", () => {
