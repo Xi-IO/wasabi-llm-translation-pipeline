@@ -110,29 +110,95 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
   const runLogger = options.runLogger;
   const verboseFailures = Boolean(options.verboseFailures);
   const runSummary = options.runSummary || {};
+  const batchRetryDelayMs = Number(options.batchRetryDelayMs ?? 1500);
+  const singleRetryDelayMs = Number(options.singleRetryDelayMs ?? 700);
+  runSummary.totalNodes = items.length;
   runSummary.batchesRetried = 0;
   runSummary.batchesRecovered = 0;
   runSummary.totalFailureEvents = 0;
+  runSummary.batchSuccessNodes = 0;
+  runSummary.singleRecoveredNodes = 0;
+  runSummary.unresolvedNodes = 0;
+  runSummary.unresolvedNodeKeys = [];
 
-  const client = createClient();
+  const customBatchTranslator = options.batchTranslator;
+  const client = customBatchTranslator ? null : createClient();
+  const batchTranslator = customBatchTranslator
+    || ((batch) => translateBatch(client, batch, langOptions, promptPath));
   const existing = await cache.load(cachePath);
   const done = new Map(Object.entries(existing));
   const pending = items.filter((x) => !done.has(x.key));
   const batches = makeBatches(pending);
   const cacheMutex = new Mutex();
+  const itemLookup = new Map(items.map((item) => [String(item.key), item]));
   const concurrency = Math.max(1, Number(options.concurrency ?? CONFIG.translationConcurrency) || 1);
+  runSummary.cachedNodes = items.length - pending.length;
 
   console.log(`待翻译条目: ${pending.length}\n批次数: ${batches.length}\n并发度: ${concurrency}`);
+
+  async function saveRows(rows) {
+    await cacheMutex.runExclusive(async () => {
+      for (const row of rows) done.set(row.key, row.translation);
+      await cache.save(cachePath, Object.fromEntries(done));
+    });
+  }
+
+  async function markUnresolved(item, batchIndex, lastError) {
+    const original = itemText(item);
+    await saveRows([{ key: item.key, translation: original }]);
+    runSummary.unresolvedNodes += 1;
+    runSummary.unresolvedNodeKeys.push(item.key);
+
+    if (runLogger?.logUnresolvedNode) {
+      await runLogger.logUnresolvedNode({
+        batchIndex,
+        key: item.key,
+        sourceLength: original.length,
+        preview: formatNodePreview(original, 90),
+        errorType: lastError?.name || "Error",
+        errorMessage: lastError?.message || "Unknown error",
+        modelResponsePreview: lastError?.responseTextPreview || null,
+      });
+    }
+  }
+
+  async function fallbackToSingleNode(batch, batchIndex) {
+    console.warn(`批次 ${batchIndex}/${batches.length} 进入单节点降级处理`);
+
+    for (const item of batch) {
+      let nodeResolved = false;
+      let lastError = null;
+
+      for (let attempt = 1; attempt <= CONFIG.retry; attempt++) {
+        try {
+          const translated = await batchTranslator([item]);
+          await saveRows(translated);
+          runSummary.singleRecoveredNodes += 1;
+          nodeResolved = true;
+          break;
+        } catch (err) {
+          lastError = err;
+          runSummary.totalFailureEvents += 1;
+          if (attempt < CONFIG.retry && singleRetryDelayMs > 0) {
+            await sleep(singleRetryDelayMs * attempt);
+          }
+        }
+      }
+
+      if (!nodeResolved) {
+        const normalized = itemLookup.get(String(item.key)) || item;
+        await markUnresolved(normalized, batchIndex, lastError);
+      }
+    }
+  }
 
   async function processBatch(batch, i) {
     let success = false;
     for (let attempt = 1; attempt <= CONFIG.retry; attempt++) {
       try {
-        const translated = await translateBatch(client, batch, langOptions, promptPath);
-        await cacheMutex.runExclusive(async () => {
-          for (const row of translated) done.set(row.key, row.translation);
-          await cache.save(cachePath, Object.fromEntries(done));
-        });
+        const translated = await batchTranslator(batch);
+        await saveRows(translated);
+        runSummary.batchSuccessNodes += batch.length;
         if (attempt > 1) {
           runSummary.batchesRecovered += 1;
           console.log(buildRetryRecoveredMessage(i + 1, attempt));
@@ -174,10 +240,14 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
             failedNodes,
           });
         }
-        if (attempt < CONFIG.retry) await sleep(1500 * attempt);
+        if (attempt < CONFIG.retry && batchRetryDelayMs > 0) {
+          await sleep(batchRetryDelayMs * attempt);
+        }
       }
     }
-    if (!success) throw new Error(`Batch ${i + 1} failed after ${CONFIG.retry} retries.`);
+    if (!success) {
+      await fallbackToSingleNode(batch, i + 1);
+    }
   }
 
   await executeWithConcurrency(batches, concurrency, processBatch);
