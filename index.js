@@ -86,16 +86,6 @@ function parseCliArgs(argv) {
       opts.to = args[++i];
       continue;
     }
-    if (token === "--pair") {
-      const pair = args[++i] || "";
-      const [from, to] = pair.split("-");
-      if (!from || !to) {
-        throw new Error(`Invalid --pair value: ${pair}. Expected format like fr-ja.`);
-      }
-      opts.from = from;
-      opts.to = to;
-      continue;
-    }
     if (token.startsWith("--")) {
       throw new Error(`Unknown option: ${token}`);
     }
@@ -104,9 +94,7 @@ function parseCliArgs(argv) {
   }
 
   if (!input) {
-    throw new Error(
-      "用法: node index.js <input_file> [--to zh-CN] [--from auto] [--pair fr-ja]",
-    );
+    throw new Error("用法: node index.js <input_file> [--to zh-CN] [--from auto]");
   }
 
   opts.from = normalizeLangCode(opts.from, CONFIG.defaultSourceLanguage);

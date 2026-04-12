@@ -81,7 +81,7 @@ Fill in your API key in `.env`.
 
 ## Usage
 
-`node index.js <input_file> [--to target_lang] [--from source_lang] [--pair source-target]`
+`node index.js <input_file> [--to target_lang] [--from source_lang]`
 
 If you omit language options, the default is:
 `node index.js <input_file> --to zh-CN`
@@ -93,7 +93,6 @@ If you omit language options, the default is:
 **Language options:**
 - `--to`: target language (default: `zh-CN`)
 - `--from`: source language (default: `auto`, model decides)
-- `--pair`: shorthand like `fr-ja`, equivalent to `--from fr --to ja`
 
 **Examples:**
 ```bash
@@ -109,9 +108,6 @@ node index.js "english_subtitles.srt" --to ja
 
 # French -> Russian
 node index.js "subtitles.ass" --from fr --to ru
-
-# Shorthand: Russian -> French
-node index.js "subtitles.ass" --pair ru-fr
 ```
 
 **Output:**
