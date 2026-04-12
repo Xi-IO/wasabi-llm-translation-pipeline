@@ -148,6 +148,7 @@ temp/
 - 使用严格 schema 控制 LLM 输出  
 - 实现重试 + 缓存机制以支持大规模处理  
 - 将 ffmpeg 等外部工具整合进自动化流程  
+- 提示词模板已独立到 `prompts/subtitle_system.txt`，便于后续按文件类型扩展  
 
 ---
 

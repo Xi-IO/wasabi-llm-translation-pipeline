@@ -147,6 +147,7 @@ temp/
 - Controlled LLM outputs using strict schema constraints  
 - Built retry + caching system for large-scale text processing  
 - Integrated external tools (ffmpeg) into automated workflows  
+- Prompt template extracted to `prompts/subtitle_system.txt` for future per-format expansion  
 
 ---
 
