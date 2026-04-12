@@ -12,6 +12,7 @@ export function collectTranslatableItems(format, data) {
         key: String(i),
         original: e.text,
         cleaned: cleanSubtitleTextForTranslation(e.text),
+        text: cleanSubtitleTextForTranslation(e.text),
       }))
       .filter((x) => x.cleaned);
   }
@@ -24,6 +25,7 @@ export function collectTranslatableItems(format, data) {
           key: String(i),
           original: e.text,
           cleaned: cleanSubtitleTextForTranslation(e.text),
+          text: cleanSubtitleTextForTranslation(e.text),
         };
       })
       .filter((x) => x && x.cleaned);

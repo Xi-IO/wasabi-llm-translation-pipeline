@@ -37,7 +37,7 @@ export async function prepareWorkspace(inputArg) {
 }
 
 export function buildJobPaths(workspace, format, targetLangSuffix) {
-  const outputExt = format === "srt" ? ".srt" : format;
+  const outputExt = String(format || "").startsWith(".") ? format : `.${format}`;
   const translatedPath = path.resolve(
     path.join(workspace.outputSubDir, `${workspace.baseName}.${targetLangSuffix}${outputExt}`),
   );

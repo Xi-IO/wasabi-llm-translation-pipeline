@@ -89,6 +89,12 @@ If you omit language options, the default is:
 **Supported input formats:**
 - Video files with subtitles: `.mkv`
 - Standalone subtitle files: `.srt`, `.ass`, `.ssa`
+- Ebook files: `.epub`
+
+**Language options:**
+- `--to`: target language (default: `zh-CN`)
+- `--from`: source language (default: `auto`, model decides)
+- Common target language examples: `zh-CN`, `fr`, `ru`, `ja`, `ko`, `es`
 
 **Language options:**
 - `--to`: target language (default: `zh-CN`)
@@ -103,6 +109,9 @@ node index.js "My.Movie.1080p.mkv"
 # Subtitle file → translate directly
 node index.js "english_subtitles.srt"
 node index.js "subtitles.ass"
+
+# EPUB file → output translated EPUB
+node index.js "book.epub"
 
 # Set target language (e.g. Japanese)
 node index.js "english_subtitles.srt" --to ja
@@ -123,6 +132,9 @@ node index.js "english_subtitles.srt" --to es
 - **Subtitle input (.srt/.ass)**: 
   - Translated subtitle file: `output/<subtitle_name>/<subtitle_name>.<lang_suffix>.srt` (or `.ass`)
 
+- **EPUB input (.epub)**:
+  - Translated ebook: `output/<book_name>/<book_name>.<lang_suffix>.epub`
+
 **File Organization:**
 ```
 input/
@@ -130,8 +142,9 @@ input/
   │  └─ <original_file>  (input files moved here after processing)
 output/
   ├─ <filename>/
-  │  ├─ <filename>.<lang_suffix>.srt  (translated subtitles)
-  │  └─ <filename>.<lang_suffix>.mkv  (remuxed video, only for video input)
+  │  ├─ <filename>.<lang_suffix>.srt   (translated subtitles)
+  │  ├─ <filename>.<lang_suffix>.mkv   (remuxed video, only for video input)
+  │  └─ <filename>.<lang_suffix>.epub  (translated ebook, only for EPUB input)
 cache/
   └─ (auto-deleted after completion)
 temp/
@@ -148,6 +161,7 @@ temp/
 - Built retry + caching system for large-scale text processing  
 - Integrated external tools (ffmpeg) into automated workflows  
 - Prompt template extracted to `prompts/subtitle_system.txt` for future per-format expansion  
+- EPUB adapter scaffold added (`src/adapters/epub`) with dedicated prompt template `prompts/epub_system.txt`  
 
 ---
 

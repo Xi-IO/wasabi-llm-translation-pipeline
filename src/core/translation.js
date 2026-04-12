@@ -3,7 +3,15 @@ import OpenAI from "openai";
 import { CONFIG, languageLabel } from "../config/runtime.js";
 import { sleep } from "../utils/system.js";
 
-const PROMPT_PATH = new URL("../../prompts/subtitle_system.txt", import.meta.url);
+export const DEFAULT_SUBTITLE_PROMPT_PATH = new URL(
+  "../../prompts/subtitle_system.txt",
+  import.meta.url,
+);
+export const DEFAULT_EPUB_PROMPT_PATH = new URL("../../prompts/epub_system.txt", import.meta.url);
+
+function itemText(item) {
+  return String(item.text ?? item.cleaned ?? "").trim();
+}
 
 function makeBatches(items) {
   const batches = [];
@@ -11,7 +19,7 @@ function makeBatches(items) {
   let chars = 0;
 
   for (const item of items) {
-    const piece = item.cleaned.length + 40;
+    const piece = itemText(item).length + 40;
     const shouldFlush =
       current.length >= CONFIG.maxBatchItems || chars + piece > CONFIG.maxBatchChars;
 
@@ -40,19 +48,15 @@ function createClient() {
   });
 }
 
-async function loadPromptTemplate() {
-  return fs.readFile(PROMPT_PATH, "utf8");
-}
-
-async function buildMessages(batch, langOptions) {
-  const template = await loadPromptTemplate();
+async function buildMessages(batch, langOptions, promptPath) {
+  const template = await fs.readFile(promptPath || DEFAULT_SUBTITLE_PROMPT_PATH, "utf8");
   const systemPrompt = template
     .replaceAll("{{SOURCE_LANGUAGE}}", languageLabel(langOptions.from))
     .replaceAll("{{TARGET_LANGUAGE}}", languageLabel(langOptions.to));
 
   return [
     { role: "system", content: systemPrompt },
-    { role: "user", content: JSON.stringify(batch.map((x) => ({ id: x.key, text: x.cleaned })), null, 2) },
+    { role: "user", content: JSON.stringify(batch.map((x) => ({ id: x.key, text: itemText(x) })), null, 2) },
   ];
 }
 
@@ -63,8 +67,8 @@ function extractJsonArray(text) {
   return match;
 }
 
-async function translateBatch(client, batch, langOptions) {
-  const messages = await buildMessages(batch, langOptions);
+async function translateBatch(client, batch, langOptions, promptPath) {
+  const messages = await buildMessages(batch, langOptions, promptPath);
   const completion = await client.chat.completions.create({
     model: CONFIG.provider.model,
     messages,
@@ -77,7 +81,7 @@ async function translateBatch(client, batch, langOptions) {
 
   return batch.map((item) => ({
     key: item.key,
-    translation: map.get(item.key) || item.cleaned,
+    translation: map.get(item.key) || itemText(item),
   }));
 }
 
@@ -86,7 +90,8 @@ const cache = {
   save: (p, d) => fs.writeFile(p, JSON.stringify(d, null, 2), "utf8"),
 };
 
-export async function translateAll(items, cachePath, langOptions) {
+export async function translateAll(items, cachePath, langOptions, options = {}) {
+  const promptPath = options.promptPath || DEFAULT_SUBTITLE_PROMPT_PATH;
   const client = createClient();
   const existing = await cache.load(cachePath);
   const done = new Map(Object.entries(existing));
@@ -99,7 +104,7 @@ export async function translateAll(items, cachePath, langOptions) {
     let success = false;
     for (let attempt = 1; attempt <= CONFIG.retry; attempt++) {
       try {
-        const translated = await translateBatch(client, batches[i], langOptions);
+        const translated = await translateBatch(client, batches[i], langOptions, promptPath);
         for (const row of translated) done.set(row.key, row.translation);
         await cache.save(cachePath, Object.fromEntries(done));
         console.log(`批次 ${i + 1}/${batches.length} 完成`);

@@ -7,6 +7,7 @@ import { muxSubtitle } from "./src/media/ffmpeg.js";
 import { collectTranslatableItems, applyTranslations } from "./src/subtitles/translation-items.js";
 import { parseByFormat } from "./src/subtitles/format-dispatcher.js";
 import { translateAll } from "./src/core/translation.js";
+import { extractEpubItems, applyEpubTranslations, translateEpubItems } from "./src/adapters/epub/index.js";
 import {
   prepareWorkspace,
   buildJobPaths,
@@ -14,6 +15,8 @@ import {
   cleanupWorkspace,
 } from "./src/workspace/workspace.js";
 import { loadSubtitleInput } from "./src/input/subtitle-loader.js";
+import { loadEpubDocument } from "./src/input/epub-loader.js";
+import { writeEpubDocument } from "./src/output/epub-writer.js";
 
 async function main() {
   const { input, opts: langOptions } = parseCliArgs(process.argv.slice(2));
@@ -22,31 +25,51 @@ async function main() {
   console.log(`输入文件: ${workspace.inputPath}`);
   console.log(`翻译方向: ${languageLabel(langOptions.from)} -> ${languageLabel(langOptions.to)}`);
 
-  const { isMkv, format, rawText } = await loadSubtitleInput(workspace);
+  const isEpub = workspace.fileExt === ".epub";
 
-  const { translatedPath, cachePath, outputMkv } = buildJobPaths(
-    workspace,
-    format,
-    targetSuffix(langOptions.to),
-  );
+  if (isEpub) {
+    const epubDoc = loadEpubDocument(workspace.inputPath);
+    const items = extractEpubItems(epubDoc);
+    if (items.length === 0) throw new Error("EPUB 中没有找到可翻译段落。");
 
-  const parsed = parseByFormat(format, rawText);
-  const items = collectTranslatableItems(format, parsed);
-  if (items.length === 0) {
-    throw new Error("没有找到可翻译的文本条目。");
-  }
+    const { translatedPath, cachePath } = buildJobPaths(
+      workspace,
+      "epub",
+      targetSuffix(langOptions.to),
+    );
+    const translationMap = await translateEpubItems(items, cachePath, langOptions);
+    applyEpubTranslations(epubDoc, translationMap);
+    writeEpubDocument(epubDoc, translatedPath);
 
-  const translationMap = await translateAll(items, cachePath, langOptions);
-  const finalText = applyTranslations(format, parsed, translationMap);
+    console.log(`翻译完成: ${translatedPath}`);
+    console.log(`缓存文件: ${cachePath}`);
+  } else {
+    const { isMkv, format, rawText } = await loadSubtitleInput(workspace);
 
-  await fs.writeFile(translatedPath, finalText, "utf8");
+    const { translatedPath, cachePath, outputMkv } = buildJobPaths(
+      workspace,
+      format,
+      targetSuffix(langOptions.to),
+    );
 
-  console.log(`翻译完成: ${translatedPath}`);
-  console.log(`缓存文件: ${cachePath}`);
+    const parsed = parseByFormat(format, rawText);
+    const items = collectTranslatableItems(format, parsed);
+    if (items.length === 0) {
+      throw new Error("没有找到可翻译的文本条目。");
+    }
 
-  if (isMkv) {
-    await muxSubtitle(workspace.inputPath, translatedPath, outputMkv, langOptions.to);
-    console.log(`已封装: ${outputMkv}`);
+    const translationMap = await translateAll(items, cachePath, langOptions);
+    const finalText = applyTranslations(format, parsed, translationMap);
+
+    await fs.writeFile(translatedPath, finalText, "utf8");
+
+    console.log(`翻译完成: ${translatedPath}`);
+    console.log(`缓存文件: ${cachePath}`);
+
+    if (isMkv) {
+      await muxSubtitle(workspace.inputPath, translatedPath, outputMkv, langOptions.to);
+      console.log(`已封装: ${outputMkv}`);
+    }
   }
 
   await archiveInput(workspace);
