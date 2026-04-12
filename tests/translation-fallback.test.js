@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
+import { evaluateNodeQuality } from "../src/core/quality-checks.js";
 
-async function loadTranslateAll() {
+async function loadTranslationModule() {
   process.env.QWEN_API_KEY = process.env.QWEN_API_KEY || "test-key";
-  const mod = await import("../src/core/translation.js");
-  return mod.translateAll;
+  return import("../src/core/translation.js");
 }
 
 function makeItems() {
@@ -19,7 +19,7 @@ function makeItems() {
 }
 
 test("batch failure falls back to per-node retries and keeps pipeline running", async () => {
-  const translateAll = await loadTranslateAll();
+  const { translateAll } = await loadTranslationModule();
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "translation-fallback-"));
   const cachePath = path.join(dir, "cache.json");
   const calls = [];
@@ -75,7 +75,7 @@ test("batch failure falls back to per-node retries and keeps pipeline running", 
 });
 
 test("successful nodes persist incrementally when some nodes fail", async () => {
-  const translateAll = await loadTranslateAll();
+  const { translateAll, __internal } = await loadTranslationModule();
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "translation-cache-"));
   const cachePath = path.join(dir, "cache.json");
 
@@ -98,4 +98,61 @@ test("successful nodes persist incrementally when some nodes fail", async () => 
   assert.equal(persisted["1"], "ok-1");
   assert.equal(persisted["2"], "beta");
   assert.equal(persisted["3"], "ok-3");
+
+  assert.throws(
+    () => __internal.validateBatchOutput(makeItems().slice(0, 2), [{ id: "1", translation: "x" }]),
+    /length mismatch/i,
+  );
+  assert.throws(
+    () => __internal.validateBatchOutput(makeItems().slice(0, 2), [
+      { id: "1", translation: "x" },
+      { id: "unknown", translation: "y" },
+    ]),
+    /unknown node id/i,
+  );
+});
+
+test("heuristics detect mixed-language residue and glossary artifacts", () => {
+  const mixed = evaluateNodeQuality({
+    sourceText: "This paragraph is long enough to trigger quality checks and should be translated.",
+    translation: "这是明显的中文译文部分，叙述也已经翻译成中文，但是 still a large part remains in English and keeps going for many words here.",
+  });
+  assert.equal(mixed.reasons.includes("source-language-residue"), true);
+
+  const glossary = evaluateNodeQuality({
+    sourceText: "He moved rapidly across the field.",
+    translation: "他快速地移动，rapid（迅捷的）穿过了场地。",
+  });
+  assert.equal(glossary.reasons.includes("inline-glossary-artifact"), true);
+});
+
+test("only suspicious nodes trigger repair and preserve output cardinality", async () => {
+  const { translateAll } = await loadTranslationModule();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "translation-repair-"));
+  const cachePath = path.join(dir, "cache.json");
+  const items = [
+    { key: "clean", text: "Hello world." },
+    { key: "sus", text: "The cat runs rapidly through the yard." },
+  ];
+
+  let repairCalls = 0;
+  const { nodeResults, translations } = await translateAll(items, cachePath, { from: "en", to: "zh-cn" }, {
+    batchRetryDelayMs: 0,
+    singleRetryDelayMs: 0,
+    concurrency: 1,
+    returnNodeResults: true,
+    batchTranslator: async (batch) => batch.map((x) => ({
+      id: x.key,
+      translation: x.key === "sus" ? "猫跑得很快 rapid（迅捷的）在院子里。" : "你好，世界。",
+    })),
+    repairTranslator: async () => {
+      repairCalls += 1;
+      return "猫在院子里飞快地奔跑。";
+    },
+  });
+
+  assert.equal(repairCalls, 1);
+  assert.equal(nodeResults.clean.status, "translated");
+  assert.equal(nodeResults.sus.status, "translated");
+  assert.equal(Object.keys(translations).length, items.length);
 });
