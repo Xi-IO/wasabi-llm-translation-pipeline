@@ -4,6 +4,21 @@ import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import { evaluateNodeQuality } from "../src/core/quality-checks.js";
+import { parseChapterDocument, renderDocument } from "../src/epub/document.js";
+import { extractTranslationUnits, applyTranslationUnits } from "../src/epub/translation-units.js";
+
+function makeChapter(html, entryName = "OEBPS/ch1.xhtml") {
+  return {
+    entryName,
+    document: parseChapterDocument("chapter-test", html),
+  };
+}
+
+function translateProtectedText(protectedText, transform) {
+  return protectedText.replace(/\[\[\[(T\d+)\]\]\]([\s\S]*?)\[\[\[\/\1\]\]\]/g, (_all, _token, inner) => {
+    return `[[[${_token}]]]${transform(inner)}[[[/${_token}]]]`;
+  });
+}
 
 async function loadTranslationModule() {
   process.env.QWEN_API_KEY = process.env.QWEN_API_KEY || "test-key";
@@ -155,4 +170,88 @@ test("only suspicious nodes trigger repair and preserve output cardinality", asy
   assert.equal(nodeResults.clean.status, "translated");
   assert.equal(nodeResults.sus.status, "translated");
   assert.equal(Object.keys(translations).length, items.length);
+});
+
+test("epub: plain paragraph round-trips through block unit", () => {
+  const chapter = makeChapter("<html><body><p>Hello world.</p></body></html>");
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+  assert.equal(units[0].kind, "p");
+
+  const translationMap = {
+    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `ZH:${txt}`),
+  };
+  applyTranslationUnits(chapter, translationMap, units);
+  const html = renderDocument(chapter.document);
+  assert.equal(html.includes("<p>ZH:Hello world.</p>"), true);
+});
+
+test("epub: inline em structure is preserved", () => {
+  const chapter = makeChapter("<html><body><p>Hello <em>dear</em> friend.</p></body></html>");
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+
+  const translationMap = {
+    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+  };
+  applyTranslationUnits(chapter, translationMap, units);
+  const html = renderDocument(chapter.document);
+  assert.equal(html.includes("<em>译:dear</em>"), true);
+  assert.equal(html.includes("译:Hello "), true);
+});
+
+test("epub: link structure and href are preserved", () => {
+  const chapter = makeChapter("<html><body><p>Go <a href=\"#fn1\" id=\"r1\">there</a>.</p></body></html>");
+  const units = extractTranslationUnits(chapter);
+  const translationMap = {
+    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+  };
+
+  applyTranslationUnits(chapter, translationMap, units);
+  const html = renderDocument(chapter.document);
+  assert.equal(html.includes("href=\"#fn1\""), true);
+  assert.equal(html.includes("id=\"r1\""), true);
+  assert.equal(html.includes("<a href=\"#fn1\" id=\"r1\">译:there</a>"), true);
+});
+
+test("epub: heading tags keep structure after translation", () => {
+  const chapter = makeChapter("<html><body><h2>Chapter Title</h2></body></html>");
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+  assert.equal(units[0].kind, "h2");
+
+  const translationMap = {
+    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+  };
+  applyTranslationUnits(chapter, translationMap, units);
+  const html = renderDocument(chapter.document);
+  assert.equal(html.includes("<h2>译:Chapter Title</h2>"), true);
+});
+
+test("epub: unsupported nested tags are preserved conservatively", () => {
+  const source = "<html><body><p>Hello <span>world</span></p></body></html>";
+  const chapter = makeChapter(source);
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 0);
+
+  applyTranslationUnits(chapter, {}, units);
+  const html = renderDocument(chapter.document);
+  assert.equal(html.includes("<span>world</span>"), true);
+  assert.equal(html.includes("<p>Hello <span>world</span></p>"), true);
+});
+
+test("epub: reconstructed chapter remains parseable and mapping remains 1:1", () => {
+  const chapter = makeChapter("<html><body><blockquote>A <strong>quoted</strong> line.</blockquote></body></html>");
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+  assert.equal(units[0].sourceNodeIds.length, units[0].placeholderMap.length);
+
+  const translationMap = {
+    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+  };
+  applyTranslationUnits(chapter, translationMap, units);
+  const rendered = renderDocument(chapter.document);
+  const reparsed = parseChapterDocument("chapter-reparse", rendered);
+  assert.equal(Array.isArray(reparsed.children), true);
+  assert.equal(rendered.includes("<blockquote>"), true);
 });

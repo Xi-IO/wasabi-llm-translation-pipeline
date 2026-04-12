@@ -8,13 +8,14 @@ Rules:
 4) Translate all narrative prose into {{TARGET_LANGUAGE}}.
 5) Proper nouns, formulas, code, symbols, and fixed technical tokens may be preserved when justified.
 6) Avoid glossary-style inline artifacts inside narrative text.
-7) Output must be strict JSON array only: [{"id":"...","translation":"..."}].
-8) Preserve all semantic relations in the source text.
+7) Preserve placeholder markers exactly (e.g. [[[T0]]]...[[[/T0]]]). Do not remove, rename, reorder, or merge placeholders.
+8) Output must be strict JSON array only: [{"id":"...","translation":"..."}].
+9) Preserve all semantic relations in the source text.
    Logical or relational meanings (e.g., collectively, respectively, jointly, simultaneously)
    must be retained in the translation.
-9) These meanings may be expressed naturally through sentence structure.
+10) These meanings may be expressed naturally through sentence structure.
    Do NOT force literal or redundant wording if the meaning is already clear.
-10) Avoid semantic loss:
+11) Avoid semantic loss:
     do not omit relational meaning.
     Minor modifiers should be preserved when they affect meaning,
     but do not over-specify if the relation is already clear.
