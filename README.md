@@ -81,30 +81,47 @@ Fill in your API key in `.env`.
 
 ## Usage
 
-`node index.js <input_file>`
+`node index.js <input_file> [--to target_lang] [--from source_lang]`
+
+If you omit language options, the default is:
+`node index.js <input_file> --to zh-CN`
 
 **Supported input formats:**
-- Video files with subtitles: `.mkv`, `.mp4`, `.avi`, `.mov`, `.flv`
+- Video files with subtitles: `.mkv`
 - Standalone subtitle files: `.srt`, `.ass`, `.ssa`
+
+**Language options:**
+- `--to`: target language (default: `zh-CN`)
+- `--from`: source language (default: `auto`, model decides)
+- Common target language examples: `zh-CN`, `fr`, `ru`, `ja`, `ko`, `es`
 
 **Examples:**
 ```bash
 # Video file → extract, translate, remux
 node index.js "My.Movie.1080p.mkv"
-node index.js "subtitles.mp4"
 
 # Subtitle file → translate directly
 node index.js "english_subtitles.srt"
 node index.js "subtitles.ass"
+
+# Set target language (e.g. Japanese)
+node index.js "english_subtitles.srt" --to ja
+
+# French -> Russian
+node index.js "subtitles.ass" --from fr --to ru
+
+# Target language: Korean / Spanish
+node index.js "english_subtitles.srt" --to ko
+node index.js "english_subtitles.srt" --to es
 ```
 
 **Output:**
-- **Video input (.mkv/.mp4)**: 
-  - Translated subtitle file: `output/<video_name>/<video_name>.zh.srt`
+- **Video input (.mkv)**: 
+  - Translated subtitle file: `output/<video_name>/<video_name>.<lang_suffix>.srt`
   - New video with embedded subtitles: `output/<video_name>/<video_name>.zh.mkv`
   
 - **Subtitle input (.srt/.ass)**: 
-  - Translated subtitle file: `output/<subtitle_name>/<subtitle_name>.zh.srt` (or `.zh.ass`)
+  - Translated subtitle file: `output/<subtitle_name>/<subtitle_name>.<lang_suffix>.srt` (or `.ass`)
 
 **File Organization:**
 ```
@@ -113,7 +130,7 @@ input/
   │  └─ <original_file>  (input files moved here after processing)
 output/
   ├─ <filename>/
-  │  ├─ <filename>.zh.srt  (translated subtitles)
+  │  ├─ <filename>.<lang_suffix>.srt  (translated subtitles)
   │  └─ <filename>.zh.mkv  (remuxed video, only for video input)
 cache/
   └─ (auto-deleted after completion)
@@ -130,6 +147,7 @@ temp/
 - Controlled LLM outputs using strict schema constraints  
 - Built retry + caching system for large-scale text processing  
 - Integrated external tools (ffmpeg) into automated workflows  
+- Prompt template extracted to `prompts/subtitle_system.txt` for future per-format expansion  
 
 ---
 
