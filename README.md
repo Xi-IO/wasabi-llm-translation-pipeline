@@ -96,11 +96,6 @@ If you omit language options, the default is:
 - `--from`: source language (default: `auto`, model decides)
 - Common target language examples: `zh-CN`, `fr`, `ru`, `ja`, `ko`, `es`
 
-**Language options:**
-- `--to`: target language (default: `zh-CN`)
-- `--from`: source language (default: `auto`, model decides)
-- Common target language examples: `zh-CN`, `fr`, `ru`, `ja`, `ko`, `es`
-
 **Examples:**
 ```bash
 # Video file → extract, translate, remux

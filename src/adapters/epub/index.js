@@ -1,34 +1,22 @@
 import { DEFAULT_EPUB_PROMPT_PATH, translateAll } from "../../core/translation.js";
-
-function stripHtmlTags(text) {
-  return String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
+import { extractTranslationUnits, applyTranslationUnits } from "../../epub/translation-units.js";
 
 export function extractEpubItems(epubDoc) {
-  const items = [];
-
-  epubDoc.docs.forEach((doc, docIndex) => {
-    doc.elements.forEach((el, elementIndex) => {
-      const text = stripHtmlTags(doc.$(el).text());
-      if (!text) return;
-      items.push({
-        key: `${docIndex}:${elementIndex}`,
-        text,
-      });
-    });
-  });
-
-  return items;
+  return epubDoc.chapters.flatMap((chapter) =>
+    extractTranslationUnits(chapter).map((unit) => ({
+      key: unit.key,
+      kind: unit.kind,
+      sourceText: unit.sourceText,
+      sourceNodeIds: unit.sourceNodeIds,
+      chapter: unit.chapter,
+      text: unit.sourceText,
+    })),
+  );
 }
 
 export function applyEpubTranslations(epubDoc, translationMap) {
-  epubDoc.docs.forEach((doc, docIndex) => {
-    doc.elements.forEach((el, elementIndex) => {
-      const key = `${docIndex}:${elementIndex}`;
-      const translated = translationMap[key];
-      if (!translated) return;
-      doc.$(el).text(translated);
-    });
+  epubDoc.chapters.forEach((chapter) => {
+    applyTranslationUnits(chapter, translationMap);
   });
 
   return epubDoc;

@@ -1,5 +1,5 @@
 import AdmZip from "adm-zip";
-import * as cheerio from "cheerio";
+import { parseChapterDocument } from "../epub/document.js";
 
 function isHtmlEntry(entryName) {
   const lower = entryName.toLowerCase();
@@ -10,28 +10,20 @@ export function loadEpubDocument(inputPath) {
   const zip = new AdmZip(inputPath);
   const entries = zip.getEntries();
 
-  const docs = entries
+  const chapters = entries
     .filter((entry) => !entry.isDirectory && isHtmlEntry(entry.entryName))
-    .map((entry) => {
+    .map((entry, idx) => {
       const rawHtml = entry.getData().toString("utf8");
-      const $ = cheerio.load(rawHtml, { decodeEntities: false });
-      const elements = [];
-
-      $("p,li,blockquote,h1,h2,h3,h4,h5,h6").each((_, el) => {
-        const text = $(el).text().trim();
-        if (text) elements.push(el);
-      });
-
       return {
         entryName: entry.entryName,
-        $,
-        elements,
+        chapterId: `chapter-${idx}`,
+        document: parseChapterDocument(`chapter-${idx}`, rawHtml),
       };
     });
 
-  if (docs.length === 0) {
+  if (chapters.length === 0) {
     throw new Error("EPUB 中未找到可翻译的 HTML/XHTML 文档内容。");
   }
 
-  return { zip, docs };
+  return { zip, chapters };
 }

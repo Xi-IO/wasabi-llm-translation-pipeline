@@ -1,7 +1,11 @@
+import { renderDocument } from "../epub/document.js";
+import { syncTocNcx } from "../epub/toc-sync.js";
+
 export function writeEpubDocument(epubDoc, outputPath) {
-  epubDoc.docs.forEach((doc) => {
-    const html = doc.$.html();
-    epubDoc.zip.updateFile(doc.entryName, Buffer.from(html, "utf8"));
+  syncTocNcx(epubDoc);
+  epubDoc.chapters.forEach((chapter) => {
+    const html = renderDocument(chapter.document);
+    epubDoc.zip.updateFile(chapter.entryName, Buffer.from(html, "utf8"));
   });
 
   epubDoc.zip.writeZip(outputPath);
