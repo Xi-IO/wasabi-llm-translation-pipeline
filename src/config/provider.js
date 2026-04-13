@@ -54,6 +54,11 @@ export function getProviderConfig() {
 export function getFallbackProviderConfig() {
   const fallbackProvider = String(process.env.FALLBACK_PROVIDER || "").trim().toLowerCase();
   if (!fallbackProvider) return null;
+  const meta = PROVIDERS[fallbackProvider];
+  if (!meta) throw new Error(`Unsupported provider: ${fallbackProvider}`);
+  if (!process.env[meta.keyEnv]) {
+    return null;
+  }
   const fallbackModel = process.env.FALLBACK_MODEL || "";
   return resolveProviderConfig(fallbackProvider, fallbackModel);
 }

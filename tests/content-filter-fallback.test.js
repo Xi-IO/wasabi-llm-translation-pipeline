@@ -182,3 +182,20 @@ test("env config exposes primary/fallback provider and models", { concurrency: f
     assert.equal(runtime.CONFIG.fallbackOnContentFilter, true);
   });
 });
+
+test("env config skips fallback when fallback api key is missing", { concurrency: false }, async () => {
+  await withEnv({
+    PRIMARY_PROVIDER: "qwen",
+    PRIMARY_MODEL: "qwen3-max",
+    FALLBACK_PROVIDER: "grok",
+    FALLBACK_MODEL: "grok-4.1-fast",
+    FALLBACK_ON_CONTENT_FILTER: "true",
+    QWEN_API_KEY: "qwen-key",
+    GROK_API_KEY: null,
+  }, async () => {
+    const runtime = await import(`../src/config/runtime.js?fresh=${Date.now()}_${Math.random()}`);
+    assert.equal(runtime.CONFIG.provider.provider, "qwen");
+    assert.equal(runtime.CONFIG.fallbackProvider, null);
+    assert.equal(runtime.CONFIG.fallbackOnContentFilter, true);
+  });
+});
