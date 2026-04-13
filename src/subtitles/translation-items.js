@@ -13,6 +13,7 @@ export function collectTranslatableItems(format, data) {
         original: e.text,
         cleaned: cleanSubtitleTextForTranslation(e.text),
         text: cleanSubtitleTextForTranslation(e.text),
+        timeLine: e.timeLine,
       }))
       .filter((x) => x.cleaned);
   }
