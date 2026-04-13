@@ -3,6 +3,7 @@ import { extractTranslationUnits, applyTranslationUnits } from "../../epub/trans
 
 const EPUB_SPLIT_THRESHOLD = 8;
 const EPUB_SPLIT_CHUNK_SIZE = 6;
+const EPUB_SPLIT_CHAR_THRESHOLD = 1200;
 
 export function extractEpubItems(epubDoc) {
   const allItems = [];
@@ -117,12 +118,17 @@ export function buildEpubTranslationCodecs() {
     return String(item?.sourceText ?? item?.text ?? "");
   }
 
-  function deserializeSegmentTranslation(item, translation) {
-    const sourcePayload = JSON.parse(String(item?.sourceText || "{}"));
-    const sourceSegments = Array.isArray(sourcePayload?.segments) ? sourcePayload.segments : [];
-    const sourceBySid = new Map(
-      sourceSegments.map((segment) => [String(segment?.sid || "").trim(), String(segment?.text ?? "")]),
-    );
+  function deserializeSegmentTranslation(item, rowOrTranslation, rawFallback = "") {
+    if (item?.mode === "simple") {
+      const value = typeof rowOrTranslation === "string"
+        ? String(rowOrTranslation || "").trim()
+        : String(rowOrTranslation?.translation ?? rawFallback ?? "").trim();
+      if (!value) {
+        throw new Error(`EPUB simple-block translation is empty for item ${item?.key || "<unknown>"}.`);
+      }
+      return value;
+    }
+
     const expectedSids = Array.isArray(item?.segmentMap)
       ? item.segmentMap.map((mapping) => String(mapping?.sid || "").trim()).filter(Boolean)
       : [];
@@ -132,35 +138,63 @@ export function buildEpubTranslationCodecs() {
 
     let parsed = null;
     try {
-      parsed = parseSegmentPayloadLenient(translation);
+      if (rowOrTranslation && typeof rowOrTranslation === "object" && Array.isArray(rowOrTranslation.segments)) {
+        parsed = rowOrTranslation;
+      } else {
+        const raw = typeof rowOrTranslation === "string"
+          ? rowOrTranslation
+          : String(rowOrTranslation?.translation ?? rawFallback ?? "");
+        parsed = parseSegmentPayloadLenient(raw);
+      }
     } catch {
       throw new Error(`EPUB translation invalid JSON for item ${item?.key || "<unknown>"}.`);
     }
 
     const translatedSegments = Array.isArray(parsed?.segments) ? parsed.segments : [];
+    if (translatedSegments.length === 0) {
+      throw new Error(`EPUB translation segments missing/empty for item ${item?.key || "<unknown>"}.`);
+    }
     const translatedBySid = new Map();
+    const duplicateSids = [];
+    const unexpectedSids = [];
+    const expectedSidSet = new Set(expectedSids);
     for (const segment of translatedSegments) {
       const sid = String(segment?.sid || "").trim();
-      if (!sid) continue;
+      if (!sid) {
+        throw new Error(`EPUB translation has empty sid for item ${item?.key || "<unknown>"}.`);
+      }
+      if (!expectedSidSet.has(sid)) {
+        unexpectedSids.push(sid);
+        continue;
+      }
+      if (translatedBySid.has(sid)) {
+        duplicateSids.push(sid);
+        continue;
+      }
       translatedBySid.set(sid, String(segment?.text ?? ""));
     }
 
-    const missingSids = expectedSids.filter((sid) => !translatedBySid.has(sid));
-    if (missingSids.length > 3) {
+    if (duplicateSids.length > 0) {
       throw new Error(
-        `EPUB translation missing ${missingSids.length} sid(s) for item ${item?.key || "<unknown>"}: ${missingSids.join(", ")}`,
+        `EPUB translation sid duplicate for item ${item?.key || "<unknown>"}: ${[...new Set(duplicateSids)].join(", ")}`,
       );
     }
+    if (unexpectedSids.length > 0) {
+      throw new Error(
+        `EPUB translation sid mismatch for item ${item?.key || "<unknown>"}: unexpected ${[...new Set(unexpectedSids)].join(", ")}`,
+      );
+    }
+    const missingSids = expectedSids.filter((sid) => !translatedBySid.has(sid));
     if (missingSids.length > 0) {
-      console.warn(
-        `[EPUB编解码] sid缺失(${missingSids.length})，仅补齐缺失段: ${item?.key || "<unknown>"} ${missingSids.join(", ")}`,
+      throw new Error(
+        `EPUB translation sid missing for item ${item?.key || "<unknown>"}: ${missingSids.join(", ")}`,
       );
     }
 
     const normalized = {
       segments: expectedSids.map((sid) => ({
         sid,
-        text: translatedBySid.has(sid) ? translatedBySid.get(sid) : (sourceBySid.get(sid) || ""),
+        text: translatedBySid.get(sid),
       })),
     };
     return JSON.stringify(normalized);
@@ -172,8 +206,36 @@ export function buildEpubTranslationCodecs() {
   };
 }
 
-export function splitSegmentItem(item, chunkSize = EPUB_SPLIT_CHUNK_SIZE) {
-  if (!Array.isArray(item?.segmentMap) || item.segmentMap.length <= EPUB_SPLIT_THRESHOLD) {
+function evaluateSplitDecision(item, {
+  maxSegments = EPUB_SPLIT_THRESHOLD,
+  maxChars = EPUB_SPLIT_CHAR_THRESHOLD,
+  aggressiveComplexSplit = true,
+} = {}) {
+  if (!item) {
+    return { shouldSplit: false, reason: "invalid-item", segmentCount: 0, sourceChars: 0 };
+  }
+  if (item.mode === "simple") {
+    return { shouldSplit: false, reason: "simple", segmentCount: 0, sourceChars: 0 };
+  }
+  const segmentCount = Array.isArray(item.segmentMap) ? item.segmentMap.length : 0;
+  const sourceChars = String(item.sourceText || "").length;
+  if (segmentCount > maxSegments) {
+    return { shouldSplit: true, reason: "segments", segmentCount, sourceChars };
+  }
+  if (sourceChars > maxChars) {
+    return { shouldSplit: true, reason: "chars", segmentCount, sourceChars };
+  }
+  if (aggressiveComplexSplit && Array.isArray(item.modeReasons)
+    && item.modeReasons.includes("inline-complexity-high") && segmentCount > 6) {
+    return { shouldSplit: true, reason: "complexity", segmentCount, sourceChars };
+  }
+  return { shouldSplit: false, reason: "below-threshold", segmentCount, sourceChars };
+}
+
+export function splitSegmentItem(item, splitOptions = {}) {
+  const chunkSize = Number(splitOptions.chunkSize ?? EPUB_SPLIT_CHUNK_SIZE);
+  const splitDecision = evaluateSplitDecision(item, splitOptions);
+  if (!splitDecision.shouldSplit) {
     return [item];
   }
 
@@ -186,12 +248,13 @@ export function splitSegmentItem(item, chunkSize = EPUB_SPLIT_CHUNK_SIZE) {
   const segments = Array.isArray(payload?.segments) ? payload.segments : [];
   if (segments.length !== item.segmentMap.length) return [item];
 
-  const totalParts = Math.ceil(item.segmentMap.length / chunkSize);
+  const safeChunkSize = Math.max(2, chunkSize);
+  const totalParts = Math.ceil(item.segmentMap.length / safeChunkSize);
   const splitItems = [];
 
-  for (let start = 0; start < item.segmentMap.length; start += chunkSize) {
-    const end = Math.min(start + chunkSize, item.segmentMap.length);
-    const splitIndex = Math.floor(start / chunkSize);
+  for (let start = 0; start < item.segmentMap.length; start += safeChunkSize) {
+    const end = Math.min(start + safeChunkSize, item.segmentMap.length);
+    const splitIndex = Math.floor(start / safeChunkSize);
     const segmentSlice = item.segmentMap.slice(start, end);
     const payloadSlice = segments.slice(start, end);
     splitItems.push({
@@ -213,28 +276,60 @@ export function splitSegmentItem(item, chunkSize = EPUB_SPLIT_CHUNK_SIZE) {
 }
 
 export async function translateEpubItems(items, cachePath, langOptions, options = {}) {
+  const splitOptions = options.splitOptions || {};
+  const splitStats = {
+    total: items.length,
+    split: 0,
+    keptSimple: 0,
+    keptStructured: 0,
+    reasons: { segments: 0, chars: 0, complexity: 0 },
+  };
   function mergeSplitTranslations(_originalItem, splitNodeResults = []) {
     const mergedSegments = [];
     for (const node of splitNodeResults) {
-      try {
-        const parsed = JSON.parse(String(node?.translation || "{}"));
-        const segments = Array.isArray(parsed?.segments) ? parsed.segments : [];
-        mergedSegments.push(...segments);
-      } catch {
-        // ignore invalid part and continue
+      const parsed = JSON.parse(String(node?.translation || "{}"));
+      const segments = Array.isArray(parsed?.segments) ? parsed.segments : [];
+      if (segments.length === 0) {
+        throw new Error(`Split part produced empty/invalid segments for item ${node?.id || "<unknown>"}.`);
       }
+      mergedSegments.push(...segments);
+    }
+    if (mergedSegments.length === 0) {
+      throw new Error("Split merge produced empty segments.");
     }
     return JSON.stringify({ segments: mergedSegments });
   }
 
-  const expandedItems = items.flatMap((item) => splitSegmentItem(item));
+  const expandedItems = [];
+  for (const item of items) {
+    const decision = evaluateSplitDecision(item, splitOptions);
+    if (item?.mode === "simple") {
+      splitStats.keptSimple += 1;
+    } else if (decision.shouldSplit) {
+      splitStats.split += 1;
+      splitStats.reasons[decision.reason] = (splitStats.reasons[decision.reason] || 0) + 1;
+    } else {
+      splitStats.keptStructured += 1;
+    }
+    expandedItems.push(...splitSegmentItem(item, splitOptions));
+  }
+  const expandedBy = expandedItems.length - items.length;
+  console.log(
+    `[EPUB拆分] total=${splitStats.total}, split=${splitStats.split}, keptSimple=${splitStats.keptSimple}, keptStructured=${splitStats.keptStructured}, reasons=segments:${splitStats.reasons.segments},chars:${splitStats.reasons.chars},complexity:${splitStats.reasons.complexity}, expandedBy=${expandedBy}`,
+  );
+  if (options.runSummary) {
+    options.runSummary.epubSplitStats = {
+      ...splitStats,
+      expandedItems: expandedItems.length,
+    };
+  }
   const splitMap = await translateAll(expandedItems, cachePath, langOptions, {
     promptPath: DEFAULT_EPUB_PROMPT_PATH,
     persistNodeResults: true,
     returnNodeResults: false,
     enableRepair: false,
     ...buildEpubTranslationCodecs(),
-    splitItemForRetry: (item) => splitSegmentItem(item),
+    splitItemForRetry: (item) => splitSegmentItem(item, splitOptions),
     mergeSplitTranslations,
     ...options,
   });
