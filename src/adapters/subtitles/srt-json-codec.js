@@ -6,19 +6,10 @@ export function buildSrtTranslationCodecs() {
         text: String(item?.cleaned || item?.text || ""),
       });
     },
-    deserializeTranslation(item, rowOrTranslation, rawFallback = "") {
-      const raw = typeof rowOrTranslation === "string"
-        ? String(rowOrTranslation || "").trim()
-        : String(rowOrTranslation?.translation ?? rawFallback ?? "").trim();
+    deserializeTranslation(item, translation) {
+      const raw = String(translation || "").trim();
       try {
-        const parsedTranslation = (() => {
-          if (typeof rowOrTranslation !== "object" || rowOrTranslation === null) {
-            return JSON.parse((raw.match(/\{[\s\S]*\}/) || [])[0] || raw);
-          }
-          if (typeof rowOrTranslation.text === "string") return rowOrTranslation;
-          const nestedRaw = String(rowOrTranslation.translation ?? raw ?? "").trim();
-          return JSON.parse((nestedRaw.match(/\{[\s\S]*\}/) || [])[0] || nestedRaw);
-        })();
+        const parsedTranslation = JSON.parse((raw.match(/\{[\s\S]*\}/) || [])[0] || raw);
         const translatedText = String(parsedTranslation?.text ?? "").trim();
         if (!translatedText) {
           throw new Error("SRT translation payload text is empty.");

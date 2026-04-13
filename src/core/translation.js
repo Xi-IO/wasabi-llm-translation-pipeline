@@ -272,6 +272,7 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
   runSummary.totalFailureEvents = 0;
   runSummary.batchSuccessNodes = 0;
   runSummary.singleRecoveredNodes = 0;
+  runSummary.unresolvedNodes = 0;
   runSummary.unresolvedCount = 0;
   runSummary.suspiciousNodes = 0;
   runSummary.repairedNodes = 0;
@@ -374,19 +375,17 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
       },
     );
     await saveNodeResults([unresolved]);
+    runSummary.unresolvedNodes += 1;
     runSummary.unresolvedCount += 1;
     runSummary.unresolvedNodeKeys.push(item.key);
     runSummary.unresolvedItems.push({
       key: item.key,
-      mode: item?.mode || null,
       batchIndex,
       attempts,
       errorType: lastError?.name || "Error",
       errorMessage: lastError?.message || "Unknown error",
     });
-    console.warn(
-      `节点未解决，已回退原文: ${item.key}${item?.mode ? ` mode=${item.mode}` : ""} (${lastError?.message || "Unknown error"})`,
-    );
+    console.warn(`节点未解决，已回退原文: ${item.key} (${lastError?.message || "Unknown error"})`);
 
     if (runLogger?.logUnresolvedNode) {
       await runLogger.logUnresolvedNode({
@@ -505,30 +504,6 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
 
       if (!nodeResolved) {
         const normalized = itemLookup.get(String(item.key)) || item;
-        if (fallbackBatchTranslator && isContentPolicyError(lastError)) {
-          runSummary.contentPolicyFallbackHits += 1;
-          console.warn(
-            `节点触发内容策略拦截，转备用模型: ${normalized.key} -> ${fallbackProviderConfig.model}`,
-          );
-          try {
-            const fallbackRows = await fallbackBatchTranslator([normalized]);
-            const fallbackResults = await materializeRows([normalized], fallbackRows, {
-              batch: CONFIG.retry,
-              single: CONFIG.retry + 1,
-              repair: 0,
-            });
-            await saveNodeResults(fallbackResults);
-            runSummary.singleRecoveredNodes += 1;
-            runSummary.contentPolicyFallbackRecovered += 1;
-            console.log(`备用模型恢复成功: ${normalized.key}`);
-            continue;
-          } catch (fallbackErr) {
-            runSummary.totalFailureEvents += 1;
-            runSummary.contentPolicyFallbackFailed += 1;
-            lastError = fallbackErr;
-            console.warn(`备用模型失败: ${normalized.key} (${fallbackErr?.message || "Unknown error"})`);
-          }
-        }
         const splitCandidates = typeof splitItemForRetry === "function" ? splitItemForRetry(normalized) : [normalized];
         const canSplitRetry = Array.isArray(splitCandidates) && splitCandidates.length > 1;
 
@@ -565,18 +540,9 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
           }
 
           if (!splitFailed && splitNodeResults.length === splitCandidates.length) {
-            let mergedTranslation = "";
-            try {
-              mergedTranslation = typeof mergeSplitTranslations === "function"
-                ? mergeSplitTranslations(normalized, splitNodeResults)
-                : splitNodeResults.map((node) => node.translation).join("");
-            } catch (mergeErr) {
-              splitFailed = true;
-              lastError = mergeErr;
-            }
-            if (splitFailed || !String(mergedTranslation || "").trim()) {
-              lastError = lastError || new Error("Split merge result is empty.");
-            } else {
+            const mergedTranslation = typeof mergeSplitTranslations === "function"
+              ? mergeSplitTranslations(normalized, splitNodeResults)
+              : splitNodeResults.map((node) => node.translation).join("");
             const mergedResult = buildNodeResult(
               normalized,
               mergedTranslation,
@@ -587,7 +553,6 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
             await saveNodeResults([mergedResult]);
             runSummary.singleRecoveredNodes += 1;
             continue;
-            }
           }
         }
 
