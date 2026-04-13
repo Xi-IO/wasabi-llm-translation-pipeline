@@ -329,17 +329,21 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
     runSummary.unresolvedNodeKeys.push(item.key);
     runSummary.unresolvedItems.push({
       key: item.key,
+      mode: item?.mode || null,
       batchIndex,
       attempts,
       errorType: lastError?.name || "Error",
       errorMessage: lastError?.message || "Unknown error",
     });
-    console.warn(`节点未解决，已回退原文: ${item.key} (${lastError?.message || "Unknown error"})`);
+    console.warn(
+      `节点未解决，已回退原文: ${item.key}${item?.mode ? ` mode=${item.mode}` : ""} (${lastError?.message || "Unknown error"})`,
+    );
 
     if (runLogger?.logUnresolvedNode) {
       await runLogger.logUnresolvedNode({
         batchIndex,
         key: item.key,
+        mode: item?.mode || null,
         sourceLength: original.length,
         preview: formatNodePreview(original, 90),
         errorType: lastError?.name || "Error",
