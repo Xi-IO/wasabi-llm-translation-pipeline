@@ -13,6 +13,7 @@ import { collectTranslatableItems, applyTranslations } from "./src/subtitles/tra
 import { parseByFormat } from "./src/subtitles/format-dispatcher.js";
 import { translateAll } from "./src/core/translation.js";
 import { extractEpubItems, applyEpubTranslations, translateEpubItems } from "./src/adapters/epub/index.js";
+import { buildSrtTranslationCodecs } from "./src/adapters/subtitles/srt-json-codec.js";
 import { createRunLogger, preserveRunLogOnCrash } from "./src/core/run-logger.js";
 import {
   prepareWorkspace,
@@ -93,7 +94,7 @@ async function main() {
         verboseFailures: runLogger.verboseFailures,
         runSummary,
       });
-      applyEpubTranslations(workingDoc, translationMap);
+      applyEpubTranslations(workingDoc, items, translationMap);
       writeEpubDocument(epubDoc, translatedPath);
 
       console.log(`翻译完成: ${translatedPath}`);
@@ -120,11 +121,14 @@ async function main() {
         throw new Error("没有找到可翻译的文本条目。");
       }
 
+      const subtitleSerializationOptions = format === "srt" ? buildSrtTranslationCodecs() : {};
+
       const translationMap = await translateAll(items, cachePath, langOptions, {
         concurrency: langOptions.concurrency,
         runLogger,
         verboseFailures: runLogger.verboseFailures,
         runSummary,
+        ...subtitleSerializationOptions,
       });
       const finalText = applyTranslations(format, parsed, translationMap);
 
