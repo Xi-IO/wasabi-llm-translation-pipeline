@@ -18,17 +18,29 @@ function makeChapter(html, entryName = "OEBPS/ch1.xhtml") {
 }
 
 function translateSegmentPayload(sourceText, transform) {
-  const payload = JSON.parse(sourceText);
-  payload.segments = payload.segments.map((segment) => ({
-    sid: segment.sid,
-    text: transform(segment.text),
-  }));
-  return JSON.stringify(payload);
+  try {
+    const payload = JSON.parse(sourceText);
+    if (!Array.isArray(payload?.segments)) {
+      return transform(sourceText);
+    }
+    payload.segments = payload.segments.map((segment) => ({
+      sid: segment.sid,
+      text: transform(segment.text),
+    }));
+    return JSON.stringify(payload);
+  } catch {
+    return transform(sourceText);
+  }
 }
 
 async function loadTranslationModule() {
   process.env.QWEN_API_KEY = process.env.QWEN_API_KEY || "test-key";
   return import("../src/core/translation.js");
+}
+
+async function loadEpubAdapterModule() {
+  process.env.QWEN_API_KEY = process.env.QWEN_API_KEY || "test-key";
+  return import("../src/adapters/epub/index.js");
 }
 
 function makeItems() {
@@ -88,7 +100,7 @@ test("batch failure falls back to per-node retries and keeps pipeline running", 
   assert.equal(runSummary.totalNodes, 3);
   assert.equal(runSummary.batchSuccessNodes, 0);
   assert.equal(runSummary.singleRecoveredNodes, 2);
-  assert.equal(runSummary.unresolvedNodes, 1);
+  assert.equal(runSummary.unresolvedCount, 1);
   assert.deepEqual(runSummary.unresolvedNodeKeys, ["2"]);
   assert.equal(unresolvedLogs.length, 1);
   assert.equal(unresolvedLogs[0].key, "2");
@@ -131,7 +143,158 @@ test("successful nodes persist incrementally when some nodes fail", async () => 
     ]),
     /unknown node id/i,
   );
+
+  const normalized = __internal.normalizeResponseRows(
+    [{ id: "1", segments: [{ sid: "S0", text: "译文" }] }],
+    [{ key: "1", mode: "complex", segmentMap: [{ sid: "S0" }], sourceText: "{\"segments\":[{\"sid\":\"S0\",\"text\":\"src\"}]}" }],
+    (_item, row) => JSON.stringify({ segments: row.segments }),
+  );
+  assert.equal(normalized[0].translation, "{\"segments\":[{\"sid\":\"S0\",\"text\":\"译文\"}]}");
 });
+
+test("epub codec: sid completeness is strict (missing/duplicate/unexpected fail)", async () => {
+  const { buildEpubTranslationCodecs } = await loadEpubAdapterModule();
+  const codecs = buildEpubTranslationCodecs();
+  const item = {
+    key: "epub-1",
+    mode: "complex",
+    segmentMap: [{ sid: "S0" }, { sid: "S1" }],
+    sourceText: JSON.stringify({
+      segments: [
+        { sid: "S0", text: "hello" },
+        { sid: "S1", text: "world" },
+      ],
+    }),
+  };
+
+  assert.throws(
+    () => codecs.deserializeTranslation(item, { id: "epub-1", segments: [{ sid: "S0", text: "你好" }] }),
+    /sid missing/i,
+  );
+  assert.throws(
+    () => codecs.deserializeTranslation(item, {
+      id: "epub-1",
+      segments: [{ sid: "S0", text: "你好" }, { sid: "S0", text: "重复" }, { sid: "S1", text: "世界" }],
+    }),
+    /sid duplicate/i,
+  );
+  assert.throws(
+    () => codecs.deserializeTranslation(item, {
+      id: "epub-1",
+      segments: [{ sid: "S0", text: "你好" }, { sid: "S1", text: "世界" }, { sid: "S2", text: "!" }],
+    }),
+    /sid mismatch/i,
+  );
+
+  const normalized = codecs.deserializeTranslation(item, {
+    id: "epub-1",
+    segments: [{ sid: "S1", text: "世界" }, { sid: "S0", text: "你好" }],
+  });
+  assert.equal(normalized, "{\"segments\":[{\"sid\":\"S0\",\"text\":\"你好\"},{\"sid\":\"S1\",\"text\":\"世界\"}]}");
+});
+
+test("epub sid missing routes into fallback and can recover in single-node retry", async () => {
+  const { translateAll } = await loadTranslationModule();
+  const { buildEpubTranslationCodecs } = await loadEpubAdapterModule();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "translation-epub-sid-fallback-"));
+  const cachePath = path.join(dir, "cache.json");
+  const codecs = buildEpubTranslationCodecs();
+  const items = [{
+    key: "n1",
+    mode: "complex",
+    segmentMap: [{ sid: "S0" }, { sid: "S1" }],
+    sourceText: JSON.stringify({
+      segments: [
+        { sid: "S0", text: "alpha" },
+        { sid: "S1", text: "beta" },
+      ],
+    }),
+    text: JSON.stringify({
+      segments: [
+        { sid: "S0", text: "alpha" },
+        { sid: "S1", text: "beta" },
+      ],
+    }),
+  }];
+
+  let calls = 0;
+  const batchFailures = [];
+  const runSummary = {};
+  const output = await translateAll(items, cachePath, { from: "en", to: "zh-cn" }, {
+    concurrency: 1,
+    batchRetryDelayMs: 0,
+    singleRetryDelayMs: 0,
+    runSummary,
+    ...codecs,
+    runLogger: {
+      async logBatchFailure(payload) {
+        batchFailures.push(payload);
+      },
+      async logUnresolvedNode() {},
+    },
+    batchTranslator: async () => {
+      calls += 1;
+      if (calls <= 3) {
+        return [{ id: "n1", segments: [{ sid: "S0", text: "甲" }] }];
+      }
+      return [{ id: "n1", segments: [{ sid: "S0", text: "甲" }, { sid: "S1", text: "乙" }] }];
+    },
+  });
+
+  assert.equal(runSummary.singleRecoveredNodes, 1);
+  assert.equal(runSummary.unresolvedCount, 0);
+  assert.equal(batchFailures.length >= 1, true);
+  assert.equal(batchFailures.some((entry) => /sid missing/i.test(entry.errorMessage)), true);
+  assert.equal(
+    output.n1,
+    "{\"segments\":[{\"sid\":\"S0\",\"text\":\"甲\"},{\"sid\":\"S1\",\"text\":\"乙\"}]}",
+  );
+});
+
+test("epub sid failure unresolved preserves source text only at final stage", async () => {
+  const { translateAll } = await loadTranslationModule();
+  const { buildEpubTranslationCodecs } = await loadEpubAdapterModule();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "translation-epub-sid-unresolved-"));
+  const cachePath = path.join(dir, "cache.json");
+  const codecs = buildEpubTranslationCodecs();
+  const sourcePayload = JSON.stringify({
+    segments: [
+      { sid: "S0", text: "left" },
+      { sid: "S1", text: "right" },
+    ],
+  });
+  const items = [{
+    key: "n2",
+    mode: "complex",
+    segmentMap: [{ sid: "S0" }, { sid: "S1" }],
+    sourceText: sourcePayload,
+    text: sourcePayload,
+  }];
+
+  const unresolvedLogs = [];
+  const runSummary = {};
+  const output = await translateAll(items, cachePath, { from: "en", to: "zh-cn" }, {
+    concurrency: 1,
+    batchRetryDelayMs: 0,
+    singleRetryDelayMs: 0,
+    runSummary,
+    ...codecs,
+    runLogger: {
+      async logBatchFailure() {},
+      async logUnresolvedNode(payload) {
+        unresolvedLogs.push(payload);
+      },
+    },
+    batchTranslator: async () => [{ id: "n2", segments: [{ sid: "S0", text: "左" }] }],
+  });
+
+  assert.equal(runSummary.unresolvedCount, 1);
+  assert.equal(runSummary.unresolvedNodeKeys.includes("n2"), true);
+  assert.equal(unresolvedLogs.length, 1);
+  assert.equal(/sid missing/i.test(unresolvedLogs[0].errorMessage), true);
+  assert.equal(output.n2, sourcePayload);
+});
+
 
 test("cached unresolved nodes are retried on next run", async () => {
   const { translateAll } = await loadTranslationModule();
@@ -299,7 +462,7 @@ test("epub: heading tags keep structure after translation", () => {
   assert.equal(html.includes("<h2>译:Chapter Title</h2>"), true);
 });
 
-test("epub: non-block nested tags are preserved while text is still translated", () => {
+test("epub: non-block nested text remains translated after cleanup", () => {
   const source = "<html><body><p>Hello <span>world</span></p></body></html>";
   const chapter = makeChapter(source);
   const units = extractTranslationUnits(chapter);
@@ -309,8 +472,7 @@ test("epub: non-block nested tags are preserved while text is still translated",
   };
   applyTranslationUnits(chapter, translationMap, units);
   const html = renderDocument(chapter.document);
-  assert.equal(html.includes("<span>译:world</span>"), true);
-  assert.equal(html.includes("<p>译:Hello <span>译:world</span></p>"), true);
+  assert.equal(html.includes("<p>译:Hello world</p>"), true);
 });
 
 test("epub: nested block container is skipped but child block still extracted", () => {
