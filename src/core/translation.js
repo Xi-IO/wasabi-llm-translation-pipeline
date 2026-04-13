@@ -93,10 +93,12 @@ function normalizeResponseRows(parsed, batch = [], deserializeTranslation = null
   return parsed.map((x) => ({
     id: String(x?.id ?? x?.key ?? "").trim(),
     translation: (() => {
-      const raw = String(x?.translation ?? "").trim();
-      if (!deserializeTranslation) return raw;
-      const item = itemLookup.get(String(x?.id ?? x?.key ?? "").trim());
-      return String(deserializeTranslation(item || null, raw)).trim();
+      if (!deserializeTranslation) {
+        return String(x?.translation ?? "").trim();
+      }
+      const rowId = String(x?.id ?? x?.key ?? "").trim();
+      const item = itemLookup.get(rowId);
+      return String(deserializeTranslation(item || null, x, String(x?.translation ?? "").trim())).trim();
     })(),
   }));
 }

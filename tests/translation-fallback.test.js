@@ -138,6 +138,13 @@ test("successful nodes persist incrementally when some nodes fail", async () => 
     ]),
     /unknown node id/i,
   );
+
+  const normalized = __internal.normalizeResponseRows(
+    [{ id: "1", segments: [{ sid: "S0", text: "译文" }] }],
+    [{ key: "1", mode: "complex", segmentMap: [{ sid: "S0" }], sourceText: "{\"segments\":[{\"sid\":\"S0\",\"text\":\"src\"}]}" }],
+    (_item, row) => JSON.stringify({ segments: row.segments }),
+  );
+  assert.equal(normalized[0].translation, "{\"segments\":[{\"sid\":\"S0\",\"text\":\"译文\"}]}");
 });
 
 test("cached unresolved nodes are retried on next run", async () => {
