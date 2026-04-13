@@ -1,9 +1,13 @@
+import fs from "fs/promises";
+import OpenAI from "openai";
 import { DEFAULT_EPUB_PROMPT_PATH, translateAll } from "../../core/translation.js";
+import { CONFIG, languageLabel } from "../../config/runtime.js";
 import { extractTranslationUnits, applyTranslationUnits } from "../../epub/translation-units.js";
 
 const EPUB_SPLIT_THRESHOLD = 8;
 const EPUB_SPLIT_CHUNK_SIZE = 6;
 const EPUB_SPLIT_CHAR_THRESHOLD = 1200;
+const EPUB_MISSING_SEGMENTS_PROMPT_PATH = new URL("../../../prompts/epub_missing_segments_repair.txt", import.meta.url);
 
 export function extractEpubItems(epubDoc) {
   const allItems = [];
@@ -190,9 +194,14 @@ export function buildEpubTranslationCodecs() {
     }
     const missingSids = expectedSids.filter((sid) => !translatedBySid.has(sid));
     if (missingSids.length > 0) {
-      throw new Error(
+      const missingError = new Error(
         `EPUB translation sid missing for item ${item?.key || "<unknown>"}: ${missingSids.join(", ")}`,
       );
+      missingError.name = "EpubSidMissingError";
+      missingError.missingSids = missingSids;
+      missingError.expectedSids = expectedSids;
+      missingError.partialSegments = Array.from(translatedBySid.entries()).map(([sid, text]) => ({ sid, text }));
+      throw missingError;
     }
 
     const normalized = {
@@ -281,6 +290,69 @@ export function splitSegmentItem(item, splitOptions = {}) {
 
 export async function translateEpubItems(items, cachePath, langOptions, options = {}) {
   const splitOptions = options.splitOptions || {};
+  let missingSegmentsRepairPrompt = null;
+  let repairClient = null;
+  async function repairMissingSegments(item, lastError) {
+    const missingSids = Array.isArray(lastError?.missingSids) ? lastError.missingSids : [];
+    if (missingSids.length === 0) return "";
+    if (!repairClient) {
+      if (!CONFIG.provider?.apiKey) return "";
+      repairClient = new OpenAI({
+        apiKey: CONFIG.provider.apiKey,
+        baseURL: CONFIG.provider.baseURL,
+      });
+    }
+    if (!missingSegmentsRepairPrompt) {
+      missingSegmentsRepairPrompt = await fs.readFile(EPUB_MISSING_SEGMENTS_PROMPT_PATH, "utf8");
+    }
+
+    let sourcePayload = null;
+    try {
+      sourcePayload = JSON.parse(String(item?.sourceText || "{}"));
+    } catch {
+      return "";
+    }
+    const sourceSegments = Array.isArray(sourcePayload?.segments) ? sourcePayload.segments : [];
+    const sourceBySid = new Map(sourceSegments.map((segment) => [String(segment?.sid || "").trim(), String(segment?.text ?? "")]));
+    const missingSegments = missingSids
+      .map((sid) => ({ sid, text: sourceBySid.get(sid) || "" }))
+      .filter((segment) => segment.sid);
+    if (missingSegments.length === 0) return "";
+
+    const systemPrompt = missingSegmentsRepairPrompt
+      .replaceAll("{{TARGET_LANGUAGE}}", languageLabel(langOptions.to))
+      .replaceAll("{{MISSING_SEGMENTS_JSON}}", JSON.stringify({ segments: missingSegments }, null, 2));
+    const completion = await repairClient.chat.completions.create({
+      model: CONFIG.provider.model,
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: JSON.stringify({ segments: missingSegments }) },
+      ],
+    });
+    const raw = String(completion.choices?.[0]?.message?.content || "").trim();
+    const jsonText = (raw.match(/\{[\s\S]*\}/) || [raw])[0];
+    const repaired = JSON.parse(jsonText);
+    const repairedSegments = Array.isArray(repaired?.segments) ? repaired.segments : [];
+    const mergedBySid = new Map(
+      (Array.isArray(lastError?.partialSegments) ? lastError.partialSegments : [])
+        .map((segment) => [String(segment?.sid || "").trim(), String(segment?.text ?? "")]),
+    );
+    for (const segment of repairedSegments) {
+      const sid = String(segment?.sid || "").trim();
+      if (!sid || !missingSids.includes(sid)) continue;
+      mergedBySid.set(sid, String(segment?.text ?? ""));
+    }
+    const expectedSids = Array.isArray(item?.segmentMap)
+      ? item.segmentMap.map((segment) => String(segment?.sid || "").trim()).filter(Boolean)
+      : [];
+    if (expectedSids.some((sid) => !mergedBySid.has(sid))) {
+      return "";
+    }
+    return JSON.stringify({
+      segments: expectedSids.map((sid) => ({ sid, text: mergedBySid.get(sid) || "" })),
+    });
+  }
   const splitStats = {
     total: items.length,
     split: 0,
@@ -333,6 +405,7 @@ export async function translateEpubItems(items, cachePath, langOptions, options 
     returnNodeResults: false,
     enableRepair: false,
     ...buildEpubTranslationCodecs(),
+    repairMissingSegments: options.repairMissingSegments || repairMissingSegments,
     splitItemForRetry: (item) => splitSegmentItem(item, splitOptions),
     mergeSplitTranslations,
     ...options,

@@ -129,12 +129,14 @@ export function classifyBlockForTranslation(blockNode, textNodes = []) {
 
   if (supSubCount > 0 && supSubLongCount > 0) reasons.push("has-sup-sub");
   if (hasPagebreak) reasons.push("has-pagebreak");
+  if ((emphasisCount > 0 || linkCount > 0) && textNodes.length >= 2) reasons.push("has-inline-structure");
   if (inlineComplexityScore >= 8) reasons.push("inline-complexity-high");
   if (linkCount >= 2 && textNodes.length >= 6) reasons.push("link-rich-inline");
   if (fragmented || (textNodes.length >= 10 && avgFragmentLength <= 10)) reasons.push("fragmented-text-nodes");
 
   const mode = reasons.some((reason) => (
-    reason === "inline-complexity-high"
+    reason === "has-inline-structure"
+    || reason === "inline-complexity-high"
     || reason === "link-rich-inline"
     || reason === "fragmented-text-nodes"
   )) ? "complex" : "simple";

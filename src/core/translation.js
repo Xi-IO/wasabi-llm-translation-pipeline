@@ -180,6 +180,10 @@ async function translateBatch(client, batch, langOptions, promptPath, codecs = {
     const wrapped = new Error(err.message);
     wrapped.name = "ModelResponseParseError";
     wrapped.responseTextPreview = formatNodePreview(text, 300);
+    wrapped.originalErrorName = err?.name || "Error";
+    if (err?.missingSids) wrapped.missingSids = err.missingSids;
+    if (err?.partialSegments) wrapped.partialSegments = err.partialSegments;
+    if (err?.expectedSids) wrapped.expectedSids = err.expectedSids;
     throw wrapped;
   }
 
@@ -282,6 +286,7 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
   const customBatchTranslator = options.batchTranslator;
   const customFallbackBatchTranslator = options.fallbackBatchTranslator;
   const customRepairTranslator = options.repairTranslator;
+  const customMissingSegmentsRepair = options.repairMissingSegments;
   const splitItemForRetry = options.splitItemForRetry;
   const mergeSplitTranslations = options.mergeSplitTranslations;
   const serializeItem = options.serializeItem || defaultSerializeItem;
@@ -509,6 +514,27 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
 
       if (!nodeResolved) {
         const normalized = itemLookup.get(String(item.key)) || item;
+        if (typeof customMissingSegmentsRepair === "function" && Array.isArray(lastError?.missingSids)) {
+          try {
+            const repairedTranslation = await customMissingSegmentsRepair(normalized, lastError);
+            if (String(repairedTranslation || "").trim()) {
+              const repairedResults = await materializeRows([normalized], [{
+                id: normalized.key,
+                translation: repairedTranslation,
+              }], {
+                batch: CONFIG.retry,
+                single: CONFIG.retry + 1,
+                repair: 0,
+              });
+              await saveNodeResults(repairedResults);
+              runSummary.singleRecoveredNodes += 1;
+              continue;
+            }
+          } catch (repairErr) {
+            lastError = repairErr;
+            runSummary.totalFailureEvents += 1;
+          }
+        }
         if (isContentPolicyError(lastError)) {
           if (fallbackBatchTranslator) {
             runSummary.contentPolicyFallbackHits += 1;

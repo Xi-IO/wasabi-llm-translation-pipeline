@@ -295,6 +295,60 @@ test("epub sid failure unresolved preserves source text only at final stage", as
   assert.equal(output.n2, sourcePayload);
 });
 
+test("missing sid can be repaired by repairMissingSegments hook before unresolved", async () => {
+  const { translateAll } = await loadTranslationModule();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "translation-repair-missing-sid-"));
+  const cachePath = path.join(dir, "cache.json");
+  const item = {
+    key: "repair-1",
+    mode: "complex",
+    segmentMap: [{ sid: "S0" }, { sid: "S1" }],
+    sourceText: JSON.stringify({
+      segments: [
+        { sid: "S0", text: "alpha" },
+        { sid: "S1", text: "beta" },
+      ],
+    }),
+    text: JSON.stringify({
+      segments: [
+        { sid: "S0", text: "alpha" },
+        { sid: "S1", text: "beta" },
+      ],
+    }),
+  };
+  let repairCalls = 0;
+  const output = await translateAll([item], cachePath, { from: "en", to: "zh-cn" }, {
+    concurrency: 1,
+    batchRetryDelayMs: 0,
+    singleRetryDelayMs: 0,
+    serializeItem: (x) => x.sourceText,
+    deserializeTranslation: (_item, row) => {
+      if (row?.translation === "broken") {
+        const err = new Error("sid missing");
+        err.missingSids = ["S1"];
+        err.partialSegments = [{ sid: "S0", text: "甲" }];
+        throw err;
+      }
+      return String(row?.translation || "");
+    },
+    batchTranslator: async () => [{ id: "repair-1", translation: "broken" }],
+    repairMissingSegments: async (_item, lastError) => {
+      repairCalls += 1;
+      assert.deepEqual(lastError.missingSids, ["S1"]);
+      return JSON.stringify({
+        segments: [
+          { sid: "S0", text: "甲" },
+          { sid: "S1", text: "乙" },
+        ],
+      });
+    },
+    runSummary: {},
+  });
+
+  assert.equal(repairCalls >= 1, true);
+  assert.equal(output["repair-1"], "{\"segments\":[{\"sid\":\"S0\",\"text\":\"甲\"},{\"sid\":\"S1\",\"text\":\"乙\"}]}");
+});
+
 
 test("cached unresolved nodes are retried on next run", async () => {
   const { translateAll } = await loadTranslationModule();

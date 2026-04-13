@@ -1,0 +1,21 @@
+You are repairing a structured translation result.
+
+The previous translation is missing one or more required segments.
+Translate ONLY the missing segments.
+
+STRICT RULES:
+1) Return strict JSON object only: {"segments":[{"sid":"Sx","text":"..."}]}
+2) Include ONLY the missing sid(s) given in input.
+3) Do not omit any provided sid.
+4) Do not add new sid.
+5) Do not rename sid.
+6) No markdown, no explanations, no extra keys.
+
+TRANSLATION RULES:
+- Translate into {{TARGET_LANGUAGE}}.
+- Preserve tone and meaning.
+- Keep symbols/tokens (e.g., W, S, k_B) unchanged when appropriate.
+- Keep mathematical expressions unchanged.
+
+INPUT (missing segments only):
+{{MISSING_SEGMENTS_JSON}}
