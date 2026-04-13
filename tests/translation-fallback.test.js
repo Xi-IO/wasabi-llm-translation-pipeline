@@ -599,6 +599,41 @@ test("epub: div containers can be extracted as translatable blocks", () => {
   assert.equal(units[0].kind, "div");
 });
 
+test("epub: pagebreak and citation markers are excluded from translation segments", () => {
+  const chapter = makeChapter(`
+    <html><body>
+      <p>Alpha<span epub:type="pagebreak" id="p30">30</span> beta
+        <span class="ref">30</span>
+        <a href="#fn1" epub:type="noteref">31</a>
+      </p>
+    </body></html>
+  `);
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+  const unit = units[0];
+  const source = unit.mode === "simple"
+    ? unit.sourceText
+    : JSON.parse(unit.sourceText).segments.map((segment) => segment.text).join("");
+  assert.equal(source.includes("30"), false);
+  assert.equal(source.includes("31"), false);
+  assert.equal(source.includes("Alpha"), true);
+  assert.equal(source.includes("beta"), true);
+});
+
+test("epub: punctuation-only fragments are merged into neighboring prose segments", () => {
+  const chapter = makeChapter("<html><body><p><span>Hello</span><span>.</span><span>World</span></p></body></html>");
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+  const unit = units[0];
+  if (unit.mode === "complex") {
+    const payload = JSON.parse(unit.sourceText);
+    const standaloneDot = payload.segments.some((segment) => segment.text.trim() === ".");
+    assert.equal(standaloneDot, false);
+  } else {
+    assert.equal(unit.sourceText.includes("Hello.World"), true);
+  }
+});
+
 test("epub: reconstructed chapter remains parseable and mapping remains 1:1", () => {
   const chapter = makeChapter("<html><body><blockquote>A <strong>quoted</strong> line.</blockquote></body></html>");
   const units = extractTranslationUnits(chapter);

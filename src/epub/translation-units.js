@@ -11,6 +11,7 @@ const NEVER_TRANSLATE_TAGS = new Set(["script", "style", "code", "pre"]);
 const WRAPPER_TAGS = new Set(["span", "font"]);
 const INLINE_EMPHASIS_TAGS = new Set(["i", "em", "strong", "b"]);
 const HEAVY_INLINE_TAGS = new Set(["a", "code", "math", "ruby", "rt"]);
+const FOOTNOTE_CLASS_HINTS = /(footnote|noteref|citation|ref\b)/i;
 
 function normalizeText(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
@@ -61,6 +62,27 @@ function isPagebreakElement(node) {
     || idAttr.includes("pagebreak")
     || epubType.includes("pagebreak")
     || role.includes("doc-pagebreak");
+}
+
+function nodeTextContent(node) {
+  if (!node) return "";
+  if (node.type === "text") return String(node.text || "");
+  return (node.children || []).map((child) => nodeTextContent(child)).join("");
+}
+
+function isFootnoteLikeElement(node) {
+  if (node?.type !== "element") return false;
+  const classAttr = String(node.attrs?.class || "");
+  const role = String(node.attrs?.role || "").toLowerCase();
+  const epubType = String(node.attrs?.["epub:type"] || node.attrs?.["data-epub-type"] || "").toLowerCase();
+  const href = String(node.attrs?.href || "").trim();
+  const text = normalizeText(nodeTextContent(node));
+  const isNumericMarker = /^[\[(（]?\d{1,4}[\])）]?$/.test(text);
+  const isFootnoteAnchor = node.tagName === "a" && href.startsWith("#");
+  if (role.includes("doc-noteref") || epubType.includes("noteref")) return true;
+  if (FOOTNOTE_CLASS_HINTS.test(classAttr) && isNumericMarker) return true;
+  if (isFootnoteAnchor && isNumericMarker) return true;
+  return false;
 }
 
 function shouldUnwrapWrapper(node, context = null) {
@@ -155,10 +177,18 @@ function hasNestedBlockStructure(blockNode) {
 
 function collectTextNodes(blockNode) {
   const textNodes = [];
-  function walk(node, parent = null, siblingIndex = 0) {
+  function walk(node, parent = null, siblingIndex = 0, context = { underPagebreak: false, underFootnote: false }) {
     if (node.type === "element" && NEVER_TRANSLATE_TAGS.has(node.tagName)) return;
+    if (node.type === "element") {
+      const nextContext = {
+        underPagebreak: context.underPagebreak || isPagebreakElement(node),
+        underFootnote: context.underFootnote || isFootnoteLikeElement(node),
+      };
+      (node.children || []).forEach((child, idx) => walk(child, node, idx, nextContext));
+      return;
+    }
     if (node.type === "text") {
-      if (normalizeText(node.text)) {
+      if (!context.underPagebreak && !context.underFootnote && normalizeText(node.text)) {
         textNodes.push({
           id: node.id,
           text: node.text || "",
@@ -168,7 +198,7 @@ function collectTextNodes(blockNode) {
       }
       return;
     }
-    (node.children || []).forEach((child, idx) => walk(child, node, idx));
+    (node.children || []).forEach((child, idx) => walk(child, node, idx, context));
   }
   (blockNode.children || []).forEach((child, idx) => walk(child, blockNode, idx));
   return textNodes;
@@ -218,7 +248,20 @@ function buildSegmentPayload(textNodes) {
     });
   }
 
-  const segments = grouped.map((group, idx) => {
+  const compacted = [];
+  for (const group of grouped) {
+    const trimmed = normalizeText(group.text);
+    const prev = compacted[compacted.length - 1];
+    if (trimmed && isInlineSymbolToken(trimmed) && prev && prev.parentId && prev.parentId === group.parentId) {
+      prev.text += group.text;
+      prev.nodeIds.push(...group.nodeIds);
+      prev.lastSiblingIndex = group.lastSiblingIndex;
+      continue;
+    }
+    compacted.push(group);
+  }
+
+  const segments = compacted.map((group, idx) => {
     const sid = `S${idx}`;
     segmentMap.push({ sid, nodeIds: group.nodeIds });
     return { sid, text: group.text || "" };
