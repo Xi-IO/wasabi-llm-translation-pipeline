@@ -9,11 +9,16 @@ export async function prepareWorkspace(inputArg) {
 
   const inputDir = path.join(process.cwd(), "input");
   const outputDir = path.join(process.cwd(), "output");
-  const cacheDir = path.join(process.cwd(), "cache");
-  const tempDir = path.join(process.cwd(), "temp");
+  const cacheRootDir = path.join(process.cwd(), "cache");
+  const tempRootDir = path.join(process.cwd(), "temp");
+  const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const cacheDir = path.join(cacheRootDir, jobId);
+  const tempDir = path.join(tempRootDir, jobId);
 
   await fs.mkdir(inputDir, { recursive: true });
   await fs.mkdir(outputDir, { recursive: true });
+  await fs.mkdir(cacheRootDir, { recursive: true });
+  await fs.mkdir(tempRootDir, { recursive: true });
   await fs.mkdir(cacheDir, { recursive: true });
   await fs.mkdir(tempDir, { recursive: true });
 
@@ -29,8 +34,11 @@ export async function prepareWorkspace(inputArg) {
     fileExt,
     inputDir,
     outputDir,
+    cacheRootDir,
+    tempRootDir,
     cacheDir,
     tempDir,
+    jobId,
     inputSubDir,
     outputSubDir,
   };
