@@ -46,6 +46,7 @@ test("content-policy error triggers provider fallback and accepts fallback resul
   const { translateAll } = await loadTranslationModule();
   const items = [{ key: "x1", text: "hello" }];
   let fallbackCalls = 0;
+  let primaryCalls = 0;
   const output = await translateAll(items, await makeCachePath("fallback-content"), { from: "en", to: "zh-cn" }, {
     concurrency: 1,
     batchRetryDelayMs: 0,
@@ -53,6 +54,7 @@ test("content-policy error triggers provider fallback and accepts fallback resul
     fallbackOnContentFilter: true,
     fallbackProviderConfig: { provider: "grok", model: "grok-4.1-fast", apiKey: "test", baseURL: "https://api.x.ai/v1" },
     batchTranslator: async () => {
+      primaryCalls += 1;
       throw new Error("HTTP 400: Input data may contain inappropriate content");
     },
     fallbackBatchTranslator: async () => {
@@ -61,6 +63,7 @@ test("content-policy error triggers provider fallback and accepts fallback resul
     },
     runSummary: {},
   });
+  assert.equal(primaryCalls, 2);
   assert.equal(fallbackCalls, 1);
   assert.equal(output.x1, "你好");
 });
@@ -122,6 +125,8 @@ test("content-policy fallback failure keeps unresolved behavior", { concurrency:
   const { translateAll } = await loadTranslationModule();
   const items = [{ key: "x4", text: "hello" }];
   const runSummary = {};
+  let primaryCalls = 0;
+  let fallbackCalls = 0;
   const output = await translateAll(items, await makeCachePath("fallback-fail"), { from: "en", to: "zh-cn" }, {
     concurrency: 1,
     batchRetryDelayMs: 0,
@@ -129,13 +134,17 @@ test("content-policy fallback failure keeps unresolved behavior", { concurrency:
     fallbackOnContentFilter: true,
     fallbackProviderConfig: { provider: "grok", model: "grok-4.1-fast", apiKey: "test", baseURL: "https://api.x.ai/v1" },
     batchTranslator: async () => {
+      primaryCalls += 1;
       throw new Error("HTTP 400 content policy block");
     },
     fallbackBatchTranslator: async () => {
+      fallbackCalls += 1;
       throw new Error("grok failed");
     },
     runSummary,
   });
+  assert.equal(primaryCalls, 2);
+  assert.equal(fallbackCalls, 1);
   assert.equal(runSummary.unresolvedCount, 1);
   assert.equal(output.x4, "hello");
 });
@@ -144,6 +153,7 @@ test("fallback disabled does not call grok even on content-policy errors", { con
   const { translateAll } = await loadTranslationModule();
   const items = [{ key: "x5", text: "hello" }];
   let fallbackCalls = 0;
+  let primaryCalls = 0;
   const output = await translateAll(items, await makeCachePath("fallback-off"), { from: "en", to: "zh-cn" }, {
     concurrency: 1,
     batchRetryDelayMs: 0,
@@ -151,6 +161,7 @@ test("fallback disabled does not call grok even on content-policy errors", { con
     fallbackOnContentFilter: false,
     fallbackProviderConfig: { provider: "grok", model: "grok-4.1-fast", apiKey: "test", baseURL: "https://api.x.ai/v1" },
     batchTranslator: async () => {
+      primaryCalls += 1;
       throw new Error("HTTP 400 content filter");
     },
     fallbackBatchTranslator: async () => {
@@ -159,6 +170,7 @@ test("fallback disabled does not call grok even on content-policy errors", { con
     },
     runSummary: {},
   });
+  assert.equal(primaryCalls, 2);
   assert.equal(fallbackCalls, 0);
   assert.equal(output.x5, "hello");
 });

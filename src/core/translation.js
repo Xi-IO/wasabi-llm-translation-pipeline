@@ -497,6 +497,10 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
         } catch (err) {
           lastError = err;
           runSummary.totalFailureEvents += 1;
+          if (isContentPolicyError(err)) {
+            console.warn(`节点命中内容策略拦截，跳过单节点重试: ${item.key}`);
+            break;
+          }
           if (attempt < CONFIG.retry && singleRetryDelayMs > 0) {
             await sleep(singleRetryDelayMs * attempt);
           }
@@ -505,29 +509,35 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
 
       if (!nodeResolved) {
         const normalized = itemLookup.get(String(item.key)) || item;
-        if (fallbackBatchTranslator && isContentPolicyError(lastError)) {
-          runSummary.contentPolicyFallbackHits += 1;
-          console.warn(
-            `节点触发内容策略拦截，转备用模型: ${normalized.key} -> ${fallbackProviderConfig.model}`,
-          );
-          try {
-            const fallbackRows = await fallbackBatchTranslator([normalized]);
-            const fallbackResults = await materializeRows([normalized], fallbackRows, {
-              batch: CONFIG.retry,
-              single: CONFIG.retry + 1,
-              repair: 0,
-            });
-            await saveNodeResults(fallbackResults);
-            runSummary.singleRecoveredNodes += 1;
-            runSummary.contentPolicyFallbackRecovered += 1;
-            console.log(`备用模型恢复成功: ${normalized.key}`);
-            continue;
-          } catch (fallbackErr) {
-            runSummary.totalFailureEvents += 1;
-            runSummary.contentPolicyFallbackFailed += 1;
-            lastError = fallbackErr;
-            console.warn(`备用模型失败: ${normalized.key} (${fallbackErr?.message || "Unknown error"})`);
+        if (isContentPolicyError(lastError)) {
+          if (fallbackBatchTranslator) {
+            runSummary.contentPolicyFallbackHits += 1;
+            console.warn(
+              `节点触发内容策略拦截，转备用模型: ${normalized.key} -> ${fallbackProviderConfig.model}`,
+            );
+            try {
+              const fallbackRows = await fallbackBatchTranslator([normalized]);
+              const fallbackResults = await materializeRows([normalized], fallbackRows, {
+                batch: CONFIG.retry,
+                single: CONFIG.retry + 1,
+                repair: 0,
+              });
+              await saveNodeResults(fallbackResults);
+              runSummary.singleRecoveredNodes += 1;
+              runSummary.contentPolicyFallbackRecovered += 1;
+              console.log(`备用模型恢复成功: ${normalized.key}`);
+              continue;
+            } catch (fallbackErr) {
+              runSummary.totalFailureEvents += 1;
+              runSummary.contentPolicyFallbackFailed += 1;
+              lastError = fallbackErr;
+              console.warn(`备用模型失败: ${normalized.key} (${fallbackErr?.message || "Unknown error"})`);
+            }
+          } else {
+            console.warn(`节点触发内容策略拦截且无备用模型，直接回退原文: ${normalized.key}`);
           }
+          await markUnresolved(normalized, batchIndex, { batch: CONFIG.retry, single: 1, repair: 0 }, lastError);
+          continue;
         }
         const splitCandidates = typeof splitItemForRetry === "function" ? splitItemForRetry(normalized) : [normalized];
         const canSplitRetry = Array.isArray(splitCandidates) && splitCandidates.length > 1;
@@ -644,6 +654,10 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
             modelResponsePreview: err.responseTextPreview || null,
             failedNodes,
           });
+        }
+        if (isContentPolicyError(err)) {
+          console.warn(`批次 ${i + 1}/${batches.length} 命中内容策略拦截，跳过批次重试`);
+          break;
         }
         if (attempt < CONFIG.retry && batchRetryDelayMs > 0) {
           await sleep(batchRetryDelayMs * attempt);
