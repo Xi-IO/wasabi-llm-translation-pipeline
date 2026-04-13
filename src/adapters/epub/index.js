@@ -190,26 +190,36 @@ export function buildEpubTranslationCodecs() {
   };
 }
 
-function shouldSplitStructuredItem(item, {
+function evaluateSplitDecision(item, {
   maxSegments = EPUB_SPLIT_THRESHOLD,
   maxChars = EPUB_SPLIT_CHAR_THRESHOLD,
   aggressiveComplexSplit = true,
 } = {}) {
-  if (!item || item.mode === "simple") return false;
+  if (!item) {
+    return { shouldSplit: false, reason: "invalid-item", segmentCount: 0, sourceChars: 0 };
+  }
+  if (item.mode === "simple") {
+    return { shouldSplit: false, reason: "simple", segmentCount: 0, sourceChars: 0 };
+  }
   const segmentCount = Array.isArray(item.segmentMap) ? item.segmentMap.length : 0;
   const sourceChars = String(item.sourceText || "").length;
-  if (segmentCount > maxSegments) return true;
-  if (sourceChars > maxChars) return true;
+  if (segmentCount > maxSegments) {
+    return { shouldSplit: true, reason: "segments", segmentCount, sourceChars };
+  }
+  if (sourceChars > maxChars) {
+    return { shouldSplit: true, reason: "chars", segmentCount, sourceChars };
+  }
   if (aggressiveComplexSplit && Array.isArray(item.modeReasons)
     && item.modeReasons.includes("inline-complexity-high") && segmentCount > 6) {
-    return true;
+    return { shouldSplit: true, reason: "complexity", segmentCount, sourceChars };
   }
-  return false;
+  return { shouldSplit: false, reason: "below-threshold", segmentCount, sourceChars };
 }
 
 export function splitSegmentItem(item, splitOptions = {}) {
   const chunkSize = Number(splitOptions.chunkSize ?? EPUB_SPLIT_CHUNK_SIZE);
-  if (!shouldSplitStructuredItem(item, splitOptions)) {
+  const splitDecision = evaluateSplitDecision(item, splitOptions);
+  if (!splitDecision.shouldSplit) {
     return [item];
   }
 
@@ -251,6 +261,13 @@ export function splitSegmentItem(item, splitOptions = {}) {
 
 export async function translateEpubItems(items, cachePath, langOptions, options = {}) {
   const splitOptions = options.splitOptions || {};
+  const splitStats = {
+    total: items.length,
+    split: 0,
+    keptSimple: 0,
+    keptStructured: 0,
+    reasons: { segments: 0, chars: 0, complexity: 0 },
+  };
   function mergeSplitTranslations(_originalItem, splitNodeResults = []) {
     const mergedSegments = [];
     for (const node of splitNodeResults) {
@@ -267,7 +284,29 @@ export async function translateEpubItems(items, cachePath, langOptions, options 
     return JSON.stringify({ segments: mergedSegments });
   }
 
-  const expandedItems = items.flatMap((item) => splitSegmentItem(item, splitOptions));
+  const expandedItems = [];
+  for (const item of items) {
+    const decision = evaluateSplitDecision(item, splitOptions);
+    if (item?.mode === "simple") {
+      splitStats.keptSimple += 1;
+    } else if (decision.shouldSplit) {
+      splitStats.split += 1;
+      splitStats.reasons[decision.reason] = (splitStats.reasons[decision.reason] || 0) + 1;
+    } else {
+      splitStats.keptStructured += 1;
+    }
+    expandedItems.push(...splitSegmentItem(item, splitOptions));
+  }
+  const expandedBy = expandedItems.length - items.length;
+  console.log(
+    `[EPUB拆分] total=${splitStats.total}, split=${splitStats.split}, keptSimple=${splitStats.keptSimple}, keptStructured=${splitStats.keptStructured}, reasons=segments:${splitStats.reasons.segments},chars:${splitStats.reasons.chars},complexity:${splitStats.reasons.complexity}, expandedBy=${expandedBy}`,
+  );
+  if (options.runSummary) {
+    options.runSummary.epubSplitStats = {
+      ...splitStats,
+      expandedItems: expandedItems.length,
+    };
+  }
   const splitMap = await translateAll(expandedItems, cachePath, langOptions, {
     promptPath: DEFAULT_EPUB_PROMPT_PATH,
     persistNodeResults: true,
