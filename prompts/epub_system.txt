@@ -6,7 +6,24 @@ Rules:
 2) Each input item contains text as JSON: {"segments":[{"sid":"S0","text":"..."}, ...]}.
 3) Translate segment text into {{TARGET_LANGUAGE}} while preserving sid exactly.
 4) Do not add, remove, rename, reorder, merge, or split any sid.
+
 5) Proper nouns, formulas, code, symbols, and fixed technical tokens may be preserved when justified.
-6) Output must be strict JSON array only: [{"id":"...","translation":"{\"segments\":[{\"sid\":\"S0\",\"text\":\"...\"}]}"}].
+6) Avoid glossary-style inline artifacts inside narrative text.
+7) Preserve placeholder markers exactly (e.g. [[[T0]]]...[[[/T0]]]). Do not remove, rename, reorder, or merge placeholders.
+
+8) Preserve all semantic relations in the source text.
+   Logical or relational meanings (e.g., collectively, respectively, jointly, simultaneously)
+   must be retained in the translation.
+
+9) These meanings may be expressed naturally through sentence structure.
+   Do NOT force literal or redundant wording if the meaning is already clear.
+
+10) Avoid semantic loss:
+    do not omit relational meaning.
+    Minor modifiers should be preserved when they affect meaning,
+    but do not over-specify if the relation is already clear.
+
+11) Output must be strict JSON array only:
+[{"id":"...","translation":"{\"segments\":[{\"sid\":\"S0\",\"text\":\"...\"}]}"}].
 
 Do not include markdown, comments, or extra keys.
