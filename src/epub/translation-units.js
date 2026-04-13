@@ -31,6 +31,19 @@ function buildCloseToken(token) {
   return `${TOKEN_OPEN}/${token}${TOKEN_CLOSE}`;
 }
 
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findPlaceholder(text, token, startIndex, isClose = false) {
+  const slashPart = isClose ? "\\/\\s*" : "";
+  const pattern = new RegExp(`\\[\\[\\[\\s*${slashPart}${escapeRegExp(token)}\\s*\\]\\]\\]`, "g");
+  pattern.lastIndex = startIndex;
+  const match = pattern.exec(text);
+  if (!match) return null;
+  return { index: match.index, end: match.index + match[0].length };
+}
+
 function normalizeText(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
@@ -105,24 +118,31 @@ function buildProtectedText(textNodes) {
 function extractSegmentsByPlaceholders(text, placeholderMap) {
   let cursor = 0;
   const segments = new Map();
+  let previousNodeId = null;
 
   for (const placeholder of placeholderMap) {
-    const open = buildOpenToken(placeholder.token);
-    const close = buildCloseToken(placeholder.token);
+    const open = findPlaceholder(text, placeholder.token, cursor, false);
+    if (!open) return null;
 
-    const openIdx = text.indexOf(open, cursor);
-    if (openIdx === -1) return null;
-    if (text.slice(cursor, openIdx).trim()) return null;
+    const interstitial = text.slice(cursor, open.index);
+    if (previousNodeId) {
+      segments.set(previousNodeId, `${segments.get(previousNodeId) || ""}${interstitial}`);
+    }
 
-    const contentStart = openIdx + open.length;
-    const closeIdx = text.indexOf(close, contentStart);
-    if (closeIdx === -1) return null;
+    const close = findPlaceholder(text, placeholder.token, open.end, true);
+    if (!close) return null;
 
-    segments.set(placeholder.nodeId, text.slice(contentStart, closeIdx));
-    cursor = closeIdx + close.length;
+    const current = text.slice(open.end, close.index);
+    segments.set(placeholder.nodeId, current);
+    previousNodeId = placeholder.nodeId;
+    cursor = close.end;
   }
 
-  if (text.slice(cursor).trim()) return null;
+  if (previousNodeId) {
+    segments.set(previousNodeId, `${segments.get(previousNodeId) || ""}${text.slice(cursor)}`);
+  }
+
+  if (segments.size !== placeholderMap.length) return null;
   return segments;
 }
 

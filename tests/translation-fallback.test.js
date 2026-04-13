@@ -335,3 +335,22 @@ test("epub: apply diagnostics detect placeholder mismatch skips", () => {
   assert.equal(diagnostics.appliedUnits, 0);
   assert.equal(diagnostics.skippedInvalidPlaceholder, 1);
 });
+
+test("epub: apply tolerates noisy text around placeholders", () => {
+  const chapter = makeChapter("<html><body><p>Hello <em>world</em>!</p></body></html>");
+  const units = extractTranslationUnits(chapter);
+  const unit = units[0];
+  const p0 = unit.placeholderMap[0].token;
+  const p1 = unit.placeholderMap[1].token;
+  const p2 = unit.placeholderMap[2].token;
+
+  const translationMap = {
+    [unit.key]: `[[[ ${p0} ]]]你好[[[ /${p0} ]]]，[[[${p1}]]]世界[[[/${p1}]]][[[${p2}]]]！[[[/${p2}]]]`,
+  };
+  const diagnostics = {};
+  applyTranslationUnits(chapter, translationMap, units, diagnostics);
+  const html = renderDocument(chapter.document);
+
+  assert.equal(diagnostics.appliedUnits, 1);
+  assert.equal(html.includes("<p>你好，<em>世界</em>！</p>"), true);
+});
