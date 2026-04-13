@@ -50,15 +50,44 @@ function makeBatches(items, serializeItem = defaultSerializeItem) {
   return batches;
 }
 
-function createClient() {
-  if (!CONFIG.provider.apiKey) {
-    throw new Error("Missing API key. Set OPENAI_API_KEY or QWEN_API_KEY in .env");
+function createClient(providerConfig = CONFIG.provider) {
+  if (!providerConfig?.apiKey) {
+    throw new Error("Missing provider API key in .env");
   }
 
   return new OpenAI({
-    apiKey: CONFIG.provider.apiKey,
-    baseURL: CONFIG.provider.baseURL,
+    apiKey: providerConfig.apiKey,
+    baseURL: providerConfig.baseURL,
   });
+}
+
+function isContentPolicyError(err) {
+  const message = String(err?.message || "").toLowerCase();
+  if (!message) return false;
+
+  const hasContentPolicySignal = (
+    message.includes("inappropriate content")
+    || message.includes("content policy")
+    || message.includes("content-filter")
+    || message.includes("content filter")
+    || message.includes("safety policy")
+    || message.includes("violates safety")
+  );
+  if (!hasContentPolicySignal) return false;
+
+  const excludedSignals = [
+    "invalid json",
+    "json",
+    "sid ",
+    "sid:",
+    "timeout",
+    "timed out",
+    "rate limit",
+    "429",
+    "econnreset",
+    "socket hang up",
+  ];
+  return !excludedSignals.some((token) => message.includes(token));
 }
 
 async function buildMessages(batch, langOptions, promptPath, serializeItem = defaultSerializeItem) {
@@ -132,12 +161,12 @@ function validateBatchOutput(batch, rows) {
   }
 }
 
-async function translateBatch(client, batch, langOptions, promptPath, codecs = {}) {
+async function translateBatch(client, batch, langOptions, promptPath, codecs = {}, providerConfig = CONFIG.provider) {
   const serializeItem = codecs.serializeItem || defaultSerializeItem;
   const deserializeTranslation = codecs.deserializeTranslation || null;
   const messages = await buildMessages(batch, langOptions, promptPath, serializeItem);
   const completion = await client.chat.completions.create({
-    model: CONFIG.provider.model,
+    model: providerConfig.model,
     messages,
     temperature: 0.2,
   });
@@ -251,19 +280,34 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
 
   const persistNodeResults = Boolean(options.persistNodeResults);
   const customBatchTranslator = options.batchTranslator;
+  const customFallbackBatchTranslator = options.fallbackBatchTranslator;
   const customRepairTranslator = options.repairTranslator;
   const splitItemForRetry = options.splitItemForRetry;
   const mergeSplitTranslations = options.mergeSplitTranslations;
   const serializeItem = options.serializeItem || defaultSerializeItem;
   const deserializeTranslation = options.deserializeTranslation || null;
+  const fallbackProviderConfig = options.fallbackProviderConfig || CONFIG.fallbackProvider;
+  const fallbackOnContentFilter = options.fallbackOnContentFilter ?? CONFIG.fallbackOnContentFilter;
+  const fallbackEnabled = Boolean(fallbackOnContentFilter && fallbackProviderConfig);
   const needsBatchClient = !customBatchTranslator;
   const needsRepairClient = repairEnabled && !customRepairTranslator;
-  const client = needsBatchClient || needsRepairClient ? createClient() : null;
+  const needsFallbackClient = fallbackEnabled && !customFallbackBatchTranslator;
+  const client = needsBatchClient || needsRepairClient ? createClient(CONFIG.provider) : null;
+  const fallbackClient = needsFallbackClient ? createClient(fallbackProviderConfig) : null;
   const batchTranslator = customBatchTranslator
     || ((batch) => translateBatch(client, batch, langOptions, promptPath, {
       serializeItem,
       deserializeTranslation,
-    }));
+    }, CONFIG.provider));
+  const fallbackBatchTranslator = fallbackEnabled
+    ? (
+      customFallbackBatchTranslator
+      || ((batch) => translateBatch(fallbackClient, batch, langOptions, promptPath, {
+        serializeItem,
+        deserializeTranslation,
+      }, fallbackProviderConfig))
+    )
+    : null;
   const repairTranslator = customRepairTranslator
     || ((item, draft) => repairNodeTranslation(client, item, draft, langOptions));
 
@@ -288,6 +332,9 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
   const cacheMutex = new Mutex();
   const concurrency = Math.max(1, Number(options.concurrency ?? CONFIG.translationConcurrency) || 1);
   runSummary.cachedNodes = items.length - pending.length;
+  runSummary.contentPolicyFallbackHits = 0;
+  runSummary.contentPolicyFallbackRecovered = 0;
+  runSummary.contentPolicyFallbackFailed = 0;
 
   console.log(`待翻译条目: ${pending.length}\n批次数: ${batches.length}\n并发度: ${concurrency}`);
 
@@ -458,6 +505,30 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
 
       if (!nodeResolved) {
         const normalized = itemLookup.get(String(item.key)) || item;
+        if (fallbackBatchTranslator && isContentPolicyError(lastError)) {
+          runSummary.contentPolicyFallbackHits += 1;
+          console.warn(
+            `节点触发内容策略拦截，转备用模型: ${normalized.key} -> ${fallbackProviderConfig.model}`,
+          );
+          try {
+            const fallbackRows = await fallbackBatchTranslator([normalized]);
+            const fallbackResults = await materializeRows([normalized], fallbackRows, {
+              batch: CONFIG.retry,
+              single: CONFIG.retry + 1,
+              repair: 0,
+            });
+            await saveNodeResults(fallbackResults);
+            runSummary.singleRecoveredNodes += 1;
+            runSummary.contentPolicyFallbackRecovered += 1;
+            console.log(`备用模型恢复成功: ${normalized.key}`);
+            continue;
+          } catch (fallbackErr) {
+            runSummary.totalFailureEvents += 1;
+            runSummary.contentPolicyFallbackFailed += 1;
+            lastError = fallbackErr;
+            console.warn(`备用模型失败: ${normalized.key} (${fallbackErr?.message || "Unknown error"})`);
+          }
+        }
         const splitCandidates = typeof splitItemForRetry === "function" ? splitItemForRetry(normalized) : [normalized];
         const canSplitRetry = Array.isArray(splitCandidates) && splitCandidates.length > 1;
 
@@ -604,6 +675,7 @@ export async function translateAll(items, cachePath, langOptions, options = {}) 
 }
 
 export const __internal = {
+  isContentPolicyError,
   normalizeResponseRows,
   validateBatchOutput,
 };
