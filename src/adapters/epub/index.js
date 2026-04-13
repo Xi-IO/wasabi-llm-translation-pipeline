@@ -14,6 +14,11 @@ function resolveEpubFailureDebugDir() {
   return process.env.EPUB_FAILURE_DEBUG_DIR || path.join(process.cwd(), "debug", "epub-failures");
 }
 
+function isEpubSegmentDebugEnabled() {
+  const flag = String(process.env.EPUB_SEGMENT_DEBUG || "").trim().toLowerCase();
+  return flag === "1" || flag === "true" || flag === "yes" || flag === "on";
+}
+
 function sanitizeDebugName(value) {
   return String(value || "unknown")
     .replace(/[^a-zA-Z0-9._-]+/g, "_")
@@ -46,6 +51,7 @@ async function dumpEpubFailureDebug({
   actualSegments,
   errorType,
 }) {
+  if (!isEpubSegmentDebugEnabled()) return;
   try {
     const expectedSids = expectedSegments.map((segment) => segment.sid);
     const actualSids = actualSegments.map((segment) => segment.sid);

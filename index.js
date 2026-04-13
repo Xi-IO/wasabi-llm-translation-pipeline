@@ -27,6 +27,9 @@ import { writeEpubDocument } from "./src/output/epub-writer.js";
 
 async function main() {
   const { input, opts: langOptions } = parseCliArgs(process.argv.slice(2));
+  if (langOptions.segmentDebug) {
+    process.env.EPUB_SEGMENT_DEBUG = "1";
+  }
   const workspace = await prepareWorkspace(input);
   const runSummary = {};
   const runLogger = await createRunLogger({

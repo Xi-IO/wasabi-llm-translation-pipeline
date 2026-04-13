@@ -198,6 +198,7 @@ test("epub codec dumps compact sid debug file only on failure", async () => {
   const codecs = buildEpubTranslationCodecs();
   const debugDir = await fs.mkdtemp(path.join(os.tmpdir(), "epub-failure-debug-"));
   process.env.EPUB_FAILURE_DEBUG_DIR = debugDir;
+  process.env.EPUB_SEGMENT_DEBUG = "1";
 
   const item = {
     key: "OEBPS/ch1.xhtml::n407::part2",
@@ -233,6 +234,7 @@ test("epub codec dumps compact sid debug file only on failure", async () => {
   assert.equal(filesAfterSuccess.length, 1);
 
   delete process.env.EPUB_FAILURE_DEBUG_DIR;
+  delete process.env.EPUB_SEGMENT_DEBUG;
 });
 
 test("epub sid missing routes into fallback and can recover in single-node retry", async () => {
