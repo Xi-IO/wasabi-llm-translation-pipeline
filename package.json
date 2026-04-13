@@ -25,7 +25,7 @@
     "version": "1.0.0",
     "description": "",
     "scripts": {
-        "test": "node --test"
+        "test": "node --test --test-concurrency=1"
     },
     "keywords": [],
     "author": "",
