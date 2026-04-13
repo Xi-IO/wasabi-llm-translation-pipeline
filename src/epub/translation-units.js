@@ -39,24 +39,73 @@ function hasNestedBlockStructure(blockNode) {
 
 function collectTextNodes(blockNode) {
   const textNodes = [];
-  function walk(node) {
+  function walk(node, parent = null, siblingIndex = 0) {
     if (node.type === "element" && NEVER_TRANSLATE_TAGS.has(node.tagName)) return;
     if (node.type === "text") {
-      if (normalizeText(node.text)) textNodes.push(node);
+      if (normalizeText(node.text)) {
+        textNodes.push({
+          id: node.id,
+          text: node.text || "",
+          parentId: parent?.id || null,
+          siblingIndex,
+        });
+      }
       return;
     }
-    for (const child of node.children || []) walk(child);
+    (node.children || []).forEach((child, idx) => walk(child, node, idx));
   }
-  for (const child of blockNode.children || []) walk(child);
+  (blockNode.children || []).forEach((child, idx) => walk(child, blockNode, idx));
   return textNodes;
+}
+
+function isShortToken(text) {
+  return normalizeText(text).length > 0 && normalizeText(text).length < 3;
+}
+
+function isInlineSymbolToken(text) {
+  const trimmed = normalizeText(text);
+  if (!trimmed) return false;
+  return /^[\p{P}\p{S}]+$/u.test(trimmed);
+}
+
+function shouldMergeSegment(prev, current) {
+  if (!prev || !current) return false;
+  if (!prev.parentId || prev.parentId !== current.parentId) return false;
+
+  const adjacentSibling = typeof prev.lastSiblingIndex === "number"
+    && typeof current.siblingIndex === "number"
+    && current.siblingIndex === prev.lastSiblingIndex + 1;
+
+  if (adjacentSibling) return true;
+
+  const prevText = prev.text;
+  const currentText = current.text;
+  return isShortToken(prevText) || isShortToken(currentText) || isInlineSymbolToken(prevText) || isInlineSymbolToken(currentText);
 }
 
 function buildSegmentPayload(textNodes) {
   const segmentMap = [];
-  const segments = textNodes.map((node, idx) => {
+  const grouped = [];
+  for (const node of textNodes) {
+    const prev = grouped[grouped.length - 1];
+    if (shouldMergeSegment(prev, node)) {
+      prev.text += node.text;
+      prev.nodeIds.push(node.id);
+      prev.lastSiblingIndex = node.siblingIndex;
+      continue;
+    }
+    grouped.push({
+      parentId: node.parentId,
+      lastSiblingIndex: node.siblingIndex,
+      nodeIds: [node.id],
+      text: node.text,
+    });
+  }
+
+  const segments = grouped.map((group, idx) => {
     const sid = `S${idx}`;
-    segmentMap.push({ sid, nodeId: node.id });
-    return { sid, text: node.text || "" };
+    segmentMap.push({ sid, nodeIds: group.nodeIds });
+    return { sid, text: group.text || "" };
   });
 
   return {
@@ -184,9 +233,20 @@ export function applyTranslationUnits(chapter, translationMap, chapterUnits = []
     }
 
     for (const mapping of unit.segmentMap) {
-      const textNode = nodeIndex.get(mapping.nodeId);
-      if (textNode?.type === "text") {
-        textNode.text = segmentsBySid.get(mapping.sid);
+      const nodeIds = Array.isArray(mapping.nodeIds)
+        ? mapping.nodeIds
+        : (mapping.nodeId ? [mapping.nodeId] : []);
+      if (nodeIds.length === 0) continue;
+      const translatedText = segmentsBySid.get(mapping.sid);
+      const firstNode = nodeIndex.get(nodeIds[0]);
+      if (firstNode?.type === "text") {
+        firstNode.text = translatedText;
+      }
+      for (const nodeId of nodeIds.slice(1)) {
+        const textNode = nodeIndex.get(nodeId);
+        if (textNode?.type === "text") {
+          textNode.text = "";
+        }
       }
     }
     stats.appliedUnits += 1;

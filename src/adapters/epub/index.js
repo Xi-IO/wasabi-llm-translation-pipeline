@@ -1,6 +1,9 @@
 import { DEFAULT_EPUB_PROMPT_PATH, translateAll } from "../../core/translation.js";
 import { extractTranslationUnits, applyTranslationUnits } from "../../epub/translation-units.js";
 
+const EPUB_SPLIT_THRESHOLD = 8;
+const EPUB_SPLIT_CHUNK_SIZE = 6;
+
 export function extractEpubItems(epubDoc) {
   const allItems = [];
   const rollup = {
@@ -137,8 +140,49 @@ export function buildEpubTranslationCodecs() {
   };
 }
 
+export function splitSegmentItem(item, chunkSize = EPUB_SPLIT_CHUNK_SIZE) {
+  if (!Array.isArray(item?.segmentMap) || item.segmentMap.length <= EPUB_SPLIT_THRESHOLD) {
+    return [item];
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(String(item.sourceText || "{}"));
+  } catch {
+    return [item];
+  }
+  const segments = Array.isArray(payload?.segments) ? payload.segments : [];
+  if (segments.length !== item.segmentMap.length) return [item];
+
+  const totalParts = Math.ceil(item.segmentMap.length / chunkSize);
+  const splitItems = [];
+
+  for (let start = 0; start < item.segmentMap.length; start += chunkSize) {
+    const end = Math.min(start + chunkSize, item.segmentMap.length);
+    const splitIndex = Math.floor(start / chunkSize);
+    const segmentSlice = item.segmentMap.slice(start, end);
+    const payloadSlice = segments.slice(start, end);
+    splitItems.push({
+      ...item,
+      key: `${item.key}::part${splitIndex + 1}`,
+      parentKey: item.key,
+      splitIndex,
+      splitTotal: totalParts,
+      segmentMap: segmentSlice,
+      sourceText: JSON.stringify({ segments: payloadSlice }),
+      text: JSON.stringify({ segments: payloadSlice }),
+      sourceNodeIds: segmentSlice.flatMap((mapping) => (
+        Array.isArray(mapping.nodeIds) ? mapping.nodeIds : (mapping.nodeId ? [mapping.nodeId] : [])
+      )),
+    });
+  }
+
+  return splitItems;
+}
+
 export async function translateEpubItems(items, cachePath, langOptions, options = {}) {
-  return translateAll(items, cachePath, langOptions, {
+  const expandedItems = items.flatMap((item) => splitSegmentItem(item));
+  const splitMap = await translateAll(expandedItems, cachePath, langOptions, {
     promptPath: DEFAULT_EPUB_PROMPT_PATH,
     persistNodeResults: true,
     returnNodeResults: false,
@@ -146,4 +190,34 @@ export async function translateEpubItems(items, cachePath, langOptions, options 
     ...buildEpubTranslationCodecs(),
     ...options,
   });
+
+  const merged = {};
+  const splitBuckets = new Map();
+  for (const item of expandedItems) {
+    const translated = splitMap[item.key];
+    if (!item.parentKey) {
+      merged[item.key] = translated;
+      continue;
+    }
+    const bucket = splitBuckets.get(item.parentKey) || [];
+    bucket.push({ splitIndex: item.splitIndex, value: translated });
+    splitBuckets.set(item.parentKey, bucket);
+  }
+
+  for (const [parentKey, parts] of splitBuckets.entries()) {
+    const ordered = parts.sort((a, b) => a.splitIndex - b.splitIndex);
+    const mergedSegments = [];
+    for (const part of ordered) {
+      try {
+        const parsed = JSON.parse(String(part.value || "{}"));
+        const segments = Array.isArray(parsed?.segments) ? parsed.segments : [];
+        mergedSegments.push(...segments);
+      } catch {
+        // keep processing other parts
+      }
+    }
+    merged[parentKey] = JSON.stringify({ segments: mergedSegments });
+  }
+
+  return merged;
 }
