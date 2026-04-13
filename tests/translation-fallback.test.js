@@ -14,10 +14,13 @@ function makeChapter(html, entryName = "OEBPS/ch1.xhtml") {
   };
 }
 
-function translateProtectedText(protectedText, transform) {
-  return protectedText.replace(/\[\[\[(T\d+)\]\]\]([\s\S]*?)\[\[\[\/\1\]\]\]/g, (_all, _token, inner) => {
-    return `[[[${_token}]]]${transform(inner)}[[[/${_token}]]]`;
-  });
+function translateSegmentPayload(sourceText, transform) {
+  const payload = JSON.parse(sourceText);
+  payload.segments = payload.segments.map((segment) => ({
+    sid: segment.sid,
+    text: transform(segment.text),
+  }));
+  return JSON.stringify(payload);
 }
 
 async function loadTranslationModule() {
@@ -212,7 +215,7 @@ test("epub: plain paragraph round-trips through block unit", () => {
   assert.equal(units[0].kind, "p");
 
   const translationMap = {
-    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `ZH:${txt}`),
+    [units[0].key]: translateSegmentPayload(units[0].sourceText, (txt) => `ZH:${txt}`),
   };
   applyTranslationUnits(chapter, translationMap, units);
   const html = renderDocument(chapter.document);
@@ -225,7 +228,7 @@ test("epub: inline em structure is preserved", () => {
   assert.equal(units.length, 1);
 
   const translationMap = {
-    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+    [units[0].key]: translateSegmentPayload(units[0].sourceText, (txt) => `译:${txt}`),
   };
   applyTranslationUnits(chapter, translationMap, units);
   const html = renderDocument(chapter.document);
@@ -237,7 +240,7 @@ test("epub: link structure and href are preserved", () => {
   const chapter = makeChapter("<html><body><p>Go <a href=\"#fn1\" id=\"r1\">there</a>.</p></body></html>");
   const units = extractTranslationUnits(chapter);
   const translationMap = {
-    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+    [units[0].key]: translateSegmentPayload(units[0].sourceText, (txt) => `译:${txt}`),
   };
 
   applyTranslationUnits(chapter, translationMap, units);
@@ -254,7 +257,7 @@ test("epub: heading tags keep structure after translation", () => {
   assert.equal(units[0].kind, "h2");
 
   const translationMap = {
-    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+    [units[0].key]: translateSegmentPayload(units[0].sourceText, (txt) => `译:${txt}`),
   };
   applyTranslationUnits(chapter, translationMap, units);
   const html = renderDocument(chapter.document);
@@ -267,7 +270,7 @@ test("epub: non-block nested tags are preserved while text is still translated",
   const units = extractTranslationUnits(chapter);
   assert.equal(units.length, 1);
   const translationMap = {
-    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+    [units[0].key]: translateSegmentPayload(units[0].sourceText, (txt) => `译:${txt}`),
   };
   applyTranslationUnits(chapter, translationMap, units);
   const html = renderDocument(chapter.document);
@@ -306,10 +309,10 @@ test("epub: reconstructed chapter remains parseable and mapping remains 1:1", ()
   const chapter = makeChapter("<html><body><blockquote>A <strong>quoted</strong> line.</blockquote></body></html>");
   const units = extractTranslationUnits(chapter);
   assert.equal(units.length, 1);
-  assert.equal(units[0].sourceNodeIds.length, units[0].placeholderMap.length);
+  assert.equal(units[0].sourceNodeIds.length, units[0].segmentMap.length);
 
   const translationMap = {
-    [units[0].key]: translateProtectedText(units[0].sourceText, (txt) => `译:${txt}`),
+    [units[0].key]: translateSegmentPayload(units[0].sourceText, (txt) => `译:${txt}`),
   };
   const diagnostics = {};
   applyTranslationUnits(chapter, translationMap, units, diagnostics);
@@ -321,13 +324,13 @@ test("epub: reconstructed chapter remains parseable and mapping remains 1:1", ()
   assert.equal(diagnostics.appliedUnits, 1);
 });
 
-test("epub: apply diagnostics detect placeholder mismatch skips", () => {
+test("epub: apply diagnostics detect segment-payload mismatch skips", () => {
   const chapter = makeChapter("<html><body><p>Hello</p></body></html>");
   const units = extractTranslationUnits(chapter);
   const diagnostics = {};
   applyTranslationUnits(
     chapter,
-    { [units[0].key]: "broken-without-placeholders" },
+    { [units[0].key]: "{\"oops\":true}" },
     units,
     diagnostics,
   );
@@ -336,16 +339,18 @@ test("epub: apply diagnostics detect placeholder mismatch skips", () => {
   assert.equal(diagnostics.skippedInvalidPlaceholder, 1);
 });
 
-test("epub: apply tolerates noisy text around placeholders", () => {
+test("epub: apply accepts segment payload with sid variations", () => {
   const chapter = makeChapter("<html><body><p>Hello <em>world</em>!</p></body></html>");
   const units = extractTranslationUnits(chapter);
   const unit = units[0];
-  const p0 = unit.placeholderMap[0].token;
-  const p1 = unit.placeholderMap[1].token;
-  const p2 = unit.placeholderMap[2].token;
 
   const translationMap = {
-    [unit.key]: `[[[ ${p0} ]]]你好[[[ /${p0} ]]]，[[[${p1}]]]世界[[[/${p1}]]][[[${p2}]]]！[[[/${p2}]]]`,
+    [unit.key]: JSON.stringify({
+      segments: unit.segmentMap.map((segment) => ({
+        sid: segment.sid,
+        text: segment.sid === "S0" ? "你好，" : (segment.sid === "S1" ? "世界" : "！"),
+      })),
+    }),
   };
   const diagnostics = {};
   applyTranslationUnits(chapter, translationMap, units, diagnostics);

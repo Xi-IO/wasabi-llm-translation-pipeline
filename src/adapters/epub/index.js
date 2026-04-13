@@ -19,7 +19,7 @@ export function extractEpubItems(epubDoc) {
       sourceNodeIds: unit.sourceNodeIds,
       chapter: unit.chapter,
       blockNodeId: unit.blockNodeId,
-      placeholderMap: unit.placeholderMap,
+      segmentMap: unit.segmentMap,
       text: unit.sourceText,
     }));
     allItems.push(...chapterItems);
@@ -87,6 +87,7 @@ export async function translateEpubItems(items, cachePath, langOptions, options 
     promptPath: DEFAULT_EPUB_PROMPT_PATH,
     persistNodeResults: true,
     returnNodeResults: false,
+    enableRepair: false,
     ...options,
   });
 }

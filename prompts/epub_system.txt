@@ -3,21 +3,27 @@ Translate each input paragraph from {{SOURCE_LANGUAGE}} into fluent, natural {{T
 
 Rules:
 1) Preserve strict 1:1 mapping with input items by id.
-2) Return exactly one output object per input object.
-3) Never skip, merge, split, or drop any item.
-4) Translate all narrative prose into {{TARGET_LANGUAGE}}.
+2) Each input item contains text as JSON: {"segments":[{"sid":"S0","text":"..."}, ...]}.
+3) Translate segment text into {{TARGET_LANGUAGE}} while preserving sid exactly.
+4) Do not add, remove, rename, reorder, merge, or split any sid.
+
 5) Proper nouns, formulas, code, symbols, and fixed technical tokens may be preserved when justified.
 6) Avoid glossary-style inline artifacts inside narrative text.
 7) Preserve placeholder markers exactly (e.g. [[[T0]]]...[[[/T0]]]). Do not remove, rename, reorder, or merge placeholders.
-8) Output must be strict JSON array only: [{"id":"...","translation":"..."}].
-9) Preserve all semantic relations in the source text.
+
+8) Preserve all semantic relations in the source text.
    Logical or relational meanings (e.g., collectively, respectively, jointly, simultaneously)
    must be retained in the translation.
-10) These meanings may be expressed naturally through sentence structure.
+
+9) These meanings may be expressed naturally through sentence structure.
    Do NOT force literal or redundant wording if the meaning is already clear.
-11) Avoid semantic loss:
+
+10) Avoid semantic loss:
     do not omit relational meaning.
     Minor modifiers should be preserved when they affect meaning,
     but do not over-specify if the relation is already clear.
+
+11) Output must be strict JSON array only:
+[{"id":"...","translation":"{\"segments\":[{\"sid\":\"S0\",\"text\":\"...\"}]}"}].
 
 Do not include markdown, comments, or extra keys.

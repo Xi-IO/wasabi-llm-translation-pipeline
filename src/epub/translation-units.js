@@ -1,22 +1,7 @@
 const BLOCK_TAGS = new Set([
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "p",
-  "li",
-  "blockquote",
-  "div",
-  "section",
-  "article",
-  "figcaption",
-  "caption",
-  "td",
-  "th",
-  "dt",
-  "dd",
+  "h1", "h2", "h3", "h4", "h5", "h6",
+  "p", "li", "blockquote", "div", "section", "article",
+  "figcaption", "caption", "td", "th", "dt", "dd",
 ]);
 const NEVER_TRANSLATE_TAGS = new Set(["script", "style", "code", "pre"]);
 
@@ -54,12 +39,10 @@ function isElement(node) {
 
 function collectNodeIndex(root) {
   const index = new Map();
-
   function walk(node) {
     index.set(node.id, node);
     for (const child of node.children || []) walk(child);
   }
-
   walk(root);
   return index;
 }
@@ -72,78 +55,59 @@ function hasNestedBlockStructure(blockNode) {
   function walk(node, isRoot = false) {
     if (node.type !== "element") return false;
     if (NEVER_TRANSLATE_TAGS.has(node.tagName)) return false;
-
     if (!isRoot && BLOCK_TAGS.has(node.tagName)) return true;
-
     return (node.children || []).some((child) => walk(child, false));
   }
-
   return (blockNode.children || []).some((child) => walk(child, false));
 }
 
 function collectTextNodes(blockNode) {
   const textNodes = [];
-
   function walk(node) {
     if (node.type === "element" && NEVER_TRANSLATE_TAGS.has(node.tagName)) return;
-
     if (node.type === "text") {
       if (normalizeText(node.text)) textNodes.push(node);
       return;
     }
-
     for (const child of node.children || []) walk(child);
   }
-
   for (const child of blockNode.children || []) walk(child);
   return textNodes;
 }
 
-function buildProtectedText(textNodes) {
-  const placeholderMap = [];
-  const chunks = [];
-
-  textNodes.forEach((node, idx) => {
-    const token = `T${idx}`;
-    placeholderMap.push({ token, nodeId: node.id });
-    chunks.push(`${buildOpenToken(token)}${node.text || ""}${buildCloseToken(token)}`);
+function buildSegmentPayload(textNodes) {
+  const segmentMap = [];
+  const segments = textNodes.map((node, idx) => {
+    const sid = `S${idx}`;
+    segmentMap.push({ sid, nodeId: node.id });
+    return { sid, text: node.text || "" };
   });
 
   return {
-    protectedSourceText: chunks.join(""),
-    placeholderMap,
+    segmentPayload: { segments },
+    segmentMap,
   };
 }
 
-function extractSegmentsByPlaceholders(text, placeholderMap) {
-  let cursor = 0;
-  const segments = new Map();
-  let previousNodeId = null;
+function parseSegmentTranslationPayload(value) {
+  if (!value) return null;
 
-  for (const placeholder of placeholderMap) {
-    const open = findPlaceholder(text, placeholder.token, cursor, false);
-    if (!open) return null;
+  const parsed = typeof value === "string"
+    ? JSON.parse((String(value).match(/\{[\s\S]*\}/) || [])[0] || value)
+    : value;
 
-    const interstitial = text.slice(cursor, open.index);
-    if (previousNodeId) {
-      segments.set(previousNodeId, `${segments.get(previousNodeId) || ""}${interstitial}`);
-    }
+  const segments = Array.isArray(parsed?.segments) ? parsed.segments : null;
+  if (!segments) return null;
 
-    const close = findPlaceholder(text, placeholder.token, open.end, true);
-    if (!close) return null;
-
-    const current = text.slice(open.end, close.index);
-    segments.set(placeholder.nodeId, current);
-    previousNodeId = placeholder.nodeId;
-    cursor = close.end;
+  const bySid = new Map();
+  for (const segment of segments) {
+    const sid = String(segment?.sid || "").trim();
+    const text = String(segment?.text ?? "");
+    if (!sid) return null;
+    bySid.set(sid, text);
   }
 
-  if (previousNodeId) {
-    segments.set(previousNodeId, `${segments.get(previousNodeId) || ""}${text.slice(cursor)}`);
-  }
-
-  if (segments.size !== placeholderMap.length) return null;
-  return segments;
+  return bySid;
 }
 
 export function extractTranslationUnits(chapter, diagnostics = null) {
@@ -166,15 +130,15 @@ export function extractTranslationUnits(chapter, diagnostics = null) {
       if (!hasNestedBlockStructure(node)) {
         const textNodes = collectTextNodes(node);
         if (textNodes.length > 0) {
-          const { protectedSourceText, placeholderMap } = buildProtectedText(textNodes);
+          const { segmentPayload, segmentMap } = buildSegmentPayload(textNodes);
           units.push({
             key: `${chapter.entryName}::${node.id}`,
             kind: node.tagName,
-            sourceText: protectedSourceText,
+            sourceText: JSON.stringify(segmentPayload),
             sourceNodeIds: textNodes.map((textNode) => textNode.id),
             chapter: chapter.entryName,
             blockNodeId: node.id,
-            placeholderMap,
+            segmentMap,
           });
           stats.producedUnits += 1;
         } else {
@@ -217,21 +181,36 @@ export function applyTranslationUnits(chapter, translationMap, chapterUnits = []
       stats.skippedMissingTranslation += 1;
       continue;
     }
-    if (!Array.isArray(unit.placeholderMap) || unit.placeholderMap.length === 0) {
+
+    const segmentsBySid = (() => {
+      try {
+        return parseSegmentTranslationPayload(translated);
+      } catch {
+        return null;
+      }
+    })();
+
+    if (!segmentsBySid || !Array.isArray(unit.segmentMap) || unit.segmentMap.length === 0) {
       stats.skippedInvalidPlaceholder += 1;
       continue;
     }
 
-    const segments = extractSegmentsByPlaceholders(String(translated), unit.placeholderMap);
-    if (!segments) {
+    let missingSid = false;
+    for (const mapping of unit.segmentMap) {
+      if (!segmentsBySid.has(mapping.sid)) {
+        missingSid = true;
+        break;
+      }
+    }
+    if (missingSid) {
       stats.skippedInvalidPlaceholder += 1;
       continue;
     }
 
-    for (const placeholder of unit.placeholderMap) {
-      const textNode = nodeIndex.get(placeholder.nodeId);
+    for (const mapping of unit.segmentMap) {
+      const textNode = nodeIndex.get(mapping.nodeId);
       if (textNode?.type === "text") {
-        textNode.text = segments.get(placeholder.nodeId) ?? textNode.text;
+        textNode.text = segmentsBySid.get(mapping.sid);
       }
     }
     stats.appliedUnits += 1;
