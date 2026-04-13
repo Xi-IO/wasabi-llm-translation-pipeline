@@ -93,7 +93,7 @@ async function main() {
         verboseFailures: runLogger.verboseFailures,
         runSummary,
       });
-      applyEpubTranslations(workingDoc, translationMap);
+      applyEpubTranslations(workingDoc, items, translationMap);
       writeEpubDocument(epubDoc, translatedPath);
 
       console.log(`翻译完成: ${translatedPath}`);
