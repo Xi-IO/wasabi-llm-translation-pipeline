@@ -29,6 +29,12 @@ test("parseCliArgs supports --chap and --dry-run", async () => {
   assert.equal(opts.dryRun, true);
 });
 
+test("parseCliArgs supports --segment debug switch", async () => {
+  const parseCliArgs = await loadParseCliArgs();
+  const { opts } = parseCliArgs(["book.epub", "--segment"]);
+  assert.equal(opts.segmentDebug, true);
+});
+
 test("--chap takes priority even when TEST_MODE is set", async () => {
   process.env.TEST_MODE = "1";
   const parseCliArgs = await loadParseCliArgs();

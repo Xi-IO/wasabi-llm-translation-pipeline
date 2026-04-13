@@ -1,7 +1,15 @@
-import { getProviderConfig } from "./provider.js";
+import { getProviderConfig, getFallbackProviderConfig } from "./provider.js";
+
+function parseBooleanEnv(raw, fallback = false) {
+  if (raw == null || raw === "") return fallback;
+  const normalized = String(raw).trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
 
 export const CONFIG = {
   provider: getProviderConfig(),
+  fallbackProvider: getFallbackProviderConfig(),
+  fallbackOnContentFilter: parseBooleanEnv(process.env.FALLBACK_ON_CONTENT_FILTER, false),
   defaultSourceLanguage: "auto",
   defaultTargetLanguage: "zh-CN",
   translationConcurrency: Number(process.env.TRANSLATION_CONCURRENCY || 4),
