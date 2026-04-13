@@ -3,10 +3,11 @@ Translate each input paragraph from {{SOURCE_LANGUAGE}} into fluent, natural {{T
 
 Rules:
 1) Preserve strict 1:1 mapping with input items by id.
-2) Each input item contains text as JSON: {"segments":[{"sid":"S0","text":"..."}, ...]}.
-3) Translate segment text into {{TARGET_LANGUAGE}} while preserving sid exactly.
-4) Do not add, remove, rename, reorder, merge, or split any sid.
-5) Proper nouns, formulas, code, symbols, and fixed technical tokens may be preserved when justified.
-6) Output must be strict JSON array only: [{"id":"...","translation":"{\"segments\":[{\"sid\":\"S0\",\"text\":\"...\"}]}"}].
+2) Some items are plain paragraph text; translate the full paragraph and return plain translated string in translation.
+3) Some items are structured JSON text: {"segments":[{"sid":"S0","text":"..."}, ...]}.
+4) For structured JSON items, translate segment text while preserving sid exactly.
+5) Do not add, remove, rename, reorder, merge, or split any sid for structured items.
+6) Proper nouns, formulas, code, symbols, and fixed technical tokens may be preserved when justified.
+7) Output must be strict JSON array only: [{"id":"...","translation":"..."}].
 
 Do not include markdown, comments, or extra keys.

@@ -18,12 +18,19 @@ function makeChapter(html, entryName = "OEBPS/ch1.xhtml") {
 }
 
 function translateSegmentPayload(sourceText, transform) {
-  const payload = JSON.parse(sourceText);
-  payload.segments = payload.segments.map((segment) => ({
-    sid: segment.sid,
-    text: transform(segment.text),
-  }));
-  return JSON.stringify(payload);
+  try {
+    const payload = JSON.parse(sourceText);
+    if (!Array.isArray(payload?.segments)) {
+      return transform(sourceText);
+    }
+    payload.segments = payload.segments.map((segment) => ({
+      sid: segment.sid,
+      text: transform(segment.text),
+    }));
+    return JSON.stringify(payload);
+  } catch {
+    return transform(sourceText);
+  }
 }
 
 async function loadTranslationModule() {

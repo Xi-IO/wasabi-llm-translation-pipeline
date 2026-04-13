@@ -111,10 +111,21 @@ export function buildEpubTranslationCodecs() {
   }
 
   function serializeSegmentItem(item) {
+    if (item?.mode === "simple") {
+      return String(item?.sourceText ?? item?.text ?? "");
+    }
     return String(item?.sourceText ?? item?.text ?? "");
   }
 
   function deserializeSegmentTranslation(item, translation) {
+    if (item?.mode === "simple") {
+      const value = String(translation || "").trim();
+      if (!value) {
+        throw new Error(`EPUB simple-block translation is empty for item ${item?.key || "<unknown>"}.`);
+      }
+      return value;
+    }
+
     const sourcePayload = JSON.parse(String(item?.sourceText || "{}"));
     const sourceSegments = Array.isArray(sourcePayload?.segments) ? sourcePayload.segments : [];
     const sourceBySid = new Map(
@@ -170,6 +181,7 @@ export function buildEpubTranslationCodecs() {
 }
 
 export function splitSegmentItem(item, chunkSize = EPUB_SPLIT_CHUNK_SIZE) {
+  if (item?.mode === "simple") return [item];
   if (!Array.isArray(item?.segmentMap) || item.segmentMap.length <= EPUB_SPLIT_THRESHOLD) {
     return [item];
   }

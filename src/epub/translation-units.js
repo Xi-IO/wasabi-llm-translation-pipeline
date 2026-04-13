@@ -101,6 +101,7 @@ export function classifyBlockForTranslation(blockNode, textNodes = []) {
 
   if (hasSupSub) reasons.push("has-sup-sub");
   if (hasPagebreak) reasons.push("has-pagebreak");
+  if (inlineComplexity >= 1) reasons.push("has-inline-structure");
   if (hasLink && inlineComplexity >= 3) reasons.push("link-rich-inline");
   if (inlineComplexity >= 6) reasons.push("inline-complexity-high");
   if (textNodes.length >= 10) reasons.push("fragmented-text-nodes");
@@ -242,14 +243,17 @@ export function extractTranslationUnits(chapter, diagnostics = null) {
         if (textNodes.length > 0) {
           const classification = classifyBlockForTranslation(node, textNodes);
           const { segmentPayload, segmentMap } = buildSegmentPayload(textNodes);
+          const isSimple = classification.mode === "simple";
           units.push({
             key: `${chapter.entryName}::${node.id}`,
             kind: node.tagName,
-            sourceText: JSON.stringify(segmentPayload),
+            sourceText: isSimple
+              ? textNodes.map((textNode) => textNode.text).join("")
+              : JSON.stringify(segmentPayload),
             sourceNodeIds: textNodes.map((textNode) => textNode.id),
             chapter: chapter.entryName,
             blockNodeId: node.id,
-            segmentMap,
+            segmentMap: isSimple ? [] : segmentMap,
             mode: classification.mode,
             modeReasons: classification.reasons,
           });
@@ -296,6 +300,29 @@ export function applyTranslationUnits(chapter, translationMap, chapterUnits = []
     const translated = translationMap[unit.key];
     if (!translated) {
       stats.skippedMissingTranslation += 1;
+      continue;
+    }
+
+    if (unit.mode === "simple") {
+      const simpleText = String(translated || "").trim();
+      if (!simpleText) {
+        stats.skippedInvalidPlaceholder += 1;
+        continue;
+      }
+      const nodeIds = Array.isArray(unit.sourceNodeIds) ? unit.sourceNodeIds : [];
+      if (nodeIds.length === 0) {
+        stats.skippedInvalidPlaceholder += 1;
+        continue;
+      }
+      const firstNode = nodeIndex.get(nodeIds[0]);
+      if (firstNode?.type === "text") {
+        firstNode.text = simpleText;
+      }
+      for (const nodeId of nodeIds.slice(1)) {
+        const textNode = nodeIndex.get(nodeId);
+        if (textNode?.type === "text") textNode.text = "";
+      }
+      stats.appliedUnits += 1;
       continue;
     }
 
