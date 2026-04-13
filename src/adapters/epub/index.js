@@ -9,6 +9,8 @@ export function extractEpubItems(epubDoc) {
   const rollup = {
     blockCandidates: 0,
     producedUnits: 0,
+    simpleUnits: 0,
+    complexUnits: 0,
     skippedReasons: {},
   };
 
@@ -18,6 +20,8 @@ export function extractEpubItems(epubDoc) {
     const chapterItems = units.map((unit) => ({
       key: unit.key,
       kind: unit.kind,
+      mode: unit.mode || "complex",
+      modeReasons: unit.modeReasons || [],
       sourceText: unit.sourceText,
       sourceNodeIds: unit.sourceNodeIds,
       chapter: unit.chapter,
@@ -29,6 +33,8 @@ export function extractEpubItems(epubDoc) {
 
     rollup.blockCandidates += diagnostics.blockCandidates || 0;
     rollup.producedUnits += diagnostics.producedUnits || 0;
+    rollup.simpleUnits += diagnostics.simpleUnits || 0;
+    rollup.complexUnits += diagnostics.complexUnits || 0;
     for (const [reason, count] of Object.entries(diagnostics.skippedReasons || {})) {
       rollup.skippedReasons[reason] = (rollup.skippedReasons[reason] || 0) + count;
     }
@@ -37,7 +43,7 @@ export function extractEpubItems(epubDoc) {
       .map(([reason, count]) => `${reason}=${count}`)
       .join(", ") || "none";
     console.log(
-      `[EPUB识别] ${chapter.entryName}: candidates=${diagnostics.blockCandidates || 0}, units=${diagnostics.producedUnits || 0}, skipped=${reasonText}`,
+      `[EPUB识别] ${chapter.entryName}: candidates=${diagnostics.blockCandidates || 0}, units=${diagnostics.producedUnits || 0}, simple=${diagnostics.simpleUnits || 0}, complex=${diagnostics.complexUnits || 0}, skipped=${reasonText}`,
     );
   }
 
@@ -45,7 +51,7 @@ export function extractEpubItems(epubDoc) {
     .map(([reason, count]) => `${reason}=${count}`)
     .join(", ") || "none";
   console.log(
-    `[EPUB识别汇总] candidates=${rollup.blockCandidates}, units=${rollup.producedUnits}, skipped=${totalReasonText}`,
+    `[EPUB识别汇总] candidates=${rollup.blockCandidates}, units=${rollup.producedUnits}, simple=${rollup.simpleUnits}, complex=${rollup.complexUnits}, skipped=${totalReasonText}`,
   );
 
   return allItems;
@@ -105,10 +111,21 @@ export function buildEpubTranslationCodecs() {
   }
 
   function serializeSegmentItem(item) {
+    if (item?.mode === "simple") {
+      return String(item?.sourceText ?? item?.text ?? "");
+    }
     return String(item?.sourceText ?? item?.text ?? "");
   }
 
   function deserializeSegmentTranslation(item, translation) {
+    if (item?.mode === "simple") {
+      const value = String(translation || "").trim();
+      if (!value) {
+        throw new Error(`EPUB simple-block translation is empty for item ${item?.key || "<unknown>"}.`);
+      }
+      return value;
+    }
+
     const sourcePayload = JSON.parse(String(item?.sourceText || "{}"));
     const sourceSegments = Array.isArray(sourcePayload?.segments) ? sourcePayload.segments : [];
     const sourceBySid = new Map(
@@ -164,6 +181,7 @@ export function buildEpubTranslationCodecs() {
 }
 
 export function splitSegmentItem(item, chunkSize = EPUB_SPLIT_CHUNK_SIZE) {
+  if (item?.mode === "simple") return [item];
   if (!Array.isArray(item?.segmentMap) || item.segmentMap.length <= EPUB_SPLIT_THRESHOLD) {
     return [item];
   }

@@ -4,6 +4,8 @@ const BLOCK_TAGS = new Set([
   "figcaption", "caption", "td", "th", "dt", "dd",
 ]);
 const NEVER_TRANSLATE_TAGS = new Set(["script", "style", "code", "pre"]);
+const WRAPPER_TAGS = new Set(["span", "font"]);
+const COMPLEX_INLINE_TAGS = new Set(["a", "i", "em", "strong", "sup", "sub", "code", "math"]);
 
 const TOKEN_OPEN = "[[[";
 const TOKEN_CLOSE = "]]]";
@@ -49,6 +51,87 @@ function collectNodeIndex(root) {
 
 function incrementReason(reasons, reason) {
   reasons[reason] = (reasons[reason] || 0) + 1;
+}
+
+function hasMeaningfulClass(node) {
+  const classAttr = String(node?.attrs?.class || "").trim();
+  if (!classAttr) return false;
+  const tokens = classAttr.split(/\s+/).filter(Boolean);
+  return tokens.some((token) => !/^calibre\d*$/i.test(token) && !/^x-?epub/i.test(token));
+}
+
+function textContentLength(node) {
+  if (!node) return 0;
+  if (node.type === "text") return normalizeText(node.text).length;
+  return (node.children || []).reduce((sum, child) => sum + textContentLength(child), 0);
+}
+
+function isPagebreakElement(node) {
+  if (node?.type !== "element") return false;
+  const classAttr = String(node.attrs?.class || "").toLowerCase();
+  const idAttr = String(node.attrs?.id || "").toLowerCase();
+  const epubType = String(node.attrs?.["epub:type"] || node.attrs?.["data-epub-type"] || "").toLowerCase();
+  const role = String(node.attrs?.role || "").toLowerCase();
+  return classAttr.includes("pagebreak")
+    || idAttr.includes("pagebreak")
+    || epubType.includes("pagebreak")
+    || role.includes("doc-pagebreak");
+}
+
+function shouldUnwrapWrapper(node) {
+  if (node?.type !== "element" || !WRAPPER_TAGS.has(node.tagName)) return false;
+  if (hasMeaningfulClass(node)) return false;
+  if (node.attrs?.lang || node.attrs?.style || node.attrs?.id || node.attrs?.role) return false;
+  if (node.attrs?.["epub:type"] || node.attrs?.title) return false;
+  return true;
+}
+
+function cleanupBlockNode(blockNode) {
+  function clean(node) {
+    if (!node || node.type !== "element") return [node];
+    const cleanedChildren = (node.children || []).flatMap((child) => clean(child)).filter(Boolean);
+    node.children = cleanedChildren;
+
+    if (isPagebreakElement(node) && textContentLength(node) === 0) {
+      return [];
+    }
+    if (shouldUnwrapWrapper(node)) {
+      return cleanedChildren;
+    }
+    return [node];
+  }
+
+  blockNode.children = (blockNode.children || []).flatMap((child) => clean(child)).filter(Boolean);
+}
+
+export function classifyBlockForTranslation(blockNode, textNodes = []) {
+  const reasons = [];
+  let inlineComplexity = 0;
+  let hasSupSub = false;
+  let hasLink = false;
+  let hasPagebreak = false;
+
+  function scan(node) {
+    if (!node) return;
+    if (node.type === "element") {
+      if (COMPLEX_INLINE_TAGS.has(node.tagName)) inlineComplexity += 1;
+      if (node.tagName === "sup" || node.tagName === "sub") hasSupSub = true;
+      if (node.tagName === "a") hasLink = true;
+      if (isPagebreakElement(node)) hasPagebreak = true;
+    }
+    for (const child of node.children || []) scan(child);
+  }
+  scan(blockNode);
+
+  if (hasSupSub) reasons.push("has-sup-sub");
+  if (hasPagebreak) reasons.push("has-pagebreak");
+  if (inlineComplexity >= 1) reasons.push("has-inline-structure");
+  if (hasLink && inlineComplexity >= 3) reasons.push("link-rich-inline");
+  if (inlineComplexity >= 6) reasons.push("inline-complexity-high");
+  if (textNodes.length >= 10) reasons.push("fragmented-text-nodes");
+
+  const mode = reasons.length > 0 ? "complex" : "simple";
+  return { mode, reasons };
 }
 
 function hasNestedBlockStructure(blockNode) {
@@ -166,6 +249,8 @@ export function extractTranslationUnits(chapter, diagnostics = null) {
     blockCandidates: 0,
     producedUnits: 0,
     skippedReasons: {},
+    simpleUnits: 0,
+    complexUnits: 0,
   };
 
   function walk(node) {
@@ -177,18 +262,27 @@ export function extractTranslationUnits(chapter, diagnostics = null) {
     if (BLOCK_TAGS.has(node.tagName)) {
       stats.blockCandidates += 1;
       if (!hasNestedBlockStructure(node)) {
+        cleanupBlockNode(node);
         const textNodes = collectTextNodes(node);
         if (textNodes.length > 0) {
+          const classification = classifyBlockForTranslation(node, textNodes);
           const { segmentPayload, segmentMap } = buildSegmentPayload(textNodes);
+          const isSimple = classification.mode === "simple";
           units.push({
             key: `${chapter.entryName}::${node.id}`,
             kind: node.tagName,
-            sourceText: JSON.stringify(segmentPayload),
+            sourceText: isSimple
+              ? textNodes.map((textNode) => textNode.text).join("")
+              : JSON.stringify(segmentPayload),
             sourceNodeIds: textNodes.map((textNode) => textNode.id),
             chapter: chapter.entryName,
             blockNodeId: node.id,
-            segmentMap,
+            segmentMap: isSimple ? [] : segmentMap,
+            mode: classification.mode,
+            modeReasons: classification.reasons,
           });
+          if (classification.mode === "simple") stats.simpleUnits += 1;
+          if (classification.mode === "complex") stats.complexUnits += 1;
           stats.producedUnits += 1;
         } else {
           incrementReason(stats.skippedReasons, "empty-text");
@@ -209,6 +303,8 @@ export function extractTranslationUnits(chapter, diagnostics = null) {
     diagnostics.chapter = stats.chapter;
     diagnostics.blockCandidates = stats.blockCandidates;
     diagnostics.producedUnits = stats.producedUnits;
+    diagnostics.simpleUnits = stats.simpleUnits;
+    diagnostics.complexUnits = stats.complexUnits;
     diagnostics.skippedReasons = { ...stats.skippedReasons };
   }
   return units;
@@ -228,6 +324,29 @@ export function applyTranslationUnits(chapter, translationMap, chapterUnits = []
     const translated = translationMap[unit.key];
     if (!translated) {
       stats.skippedMissingTranslation += 1;
+      continue;
+    }
+
+    if (unit.mode === "simple") {
+      const simpleText = String(translated || "").trim();
+      if (!simpleText) {
+        stats.skippedInvalidPlaceholder += 1;
+        continue;
+      }
+      const nodeIds = Array.isArray(unit.sourceNodeIds) ? unit.sourceNodeIds : [];
+      if (nodeIds.length === 0) {
+        stats.skippedInvalidPlaceholder += 1;
+        continue;
+      }
+      const firstNode = nodeIndex.get(nodeIds[0]);
+      if (firstNode?.type === "text") {
+        firstNode.text = simpleText;
+      }
+      for (const nodeId of nodeIds.slice(1)) {
+        const textNode = nodeIndex.get(nodeId);
+        if (textNode?.type === "text") textNode.text = "";
+      }
+      stats.appliedUnits += 1;
       continue;
     }
 

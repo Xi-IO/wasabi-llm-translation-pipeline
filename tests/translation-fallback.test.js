@@ -18,12 +18,19 @@ function makeChapter(html, entryName = "OEBPS/ch1.xhtml") {
 }
 
 function translateSegmentPayload(sourceText, transform) {
-  const payload = JSON.parse(sourceText);
-  payload.segments = payload.segments.map((segment) => ({
-    sid: segment.sid,
-    text: transform(segment.text),
-  }));
-  return JSON.stringify(payload);
+  try {
+    const payload = JSON.parse(sourceText);
+    if (!Array.isArray(payload?.segments)) {
+      return transform(sourceText);
+    }
+    payload.segments = payload.segments.map((segment) => ({
+      sid: segment.sid,
+      text: transform(segment.text),
+    }));
+    return JSON.stringify(payload);
+  } catch {
+    return transform(sourceText);
+  }
 }
 
 async function loadTranslationModule() {
@@ -299,7 +306,7 @@ test("epub: heading tags keep structure after translation", () => {
   assert.equal(html.includes("<h2>译:Chapter Title</h2>"), true);
 });
 
-test("epub: non-block nested tags are preserved while text is still translated", () => {
+test("epub: non-block nested text remains translated after cleanup", () => {
   const source = "<html><body><p>Hello <span>world</span></p></body></html>";
   const chapter = makeChapter(source);
   const units = extractTranslationUnits(chapter);
@@ -309,8 +316,7 @@ test("epub: non-block nested tags are preserved while text is still translated",
   };
   applyTranslationUnits(chapter, translationMap, units);
   const html = renderDocument(chapter.document);
-  assert.equal(html.includes("<span>译:world</span>"), true);
-  assert.equal(html.includes("<p>译:Hello <span>译:world</span></p>"), true);
+  assert.equal(html.includes("<p>译:Hello world</p>"), true);
 });
 
 test("epub: nested block container is skipped but child block still extracted", () => {
