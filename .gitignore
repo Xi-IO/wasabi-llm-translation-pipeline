@@ -25,6 +25,7 @@ node_modules/
 /cache/
 /input/
 /output/
+/debug/
 
 # --- 电子书相关 (如果你本地还在测试这个) ---
 *.epub
