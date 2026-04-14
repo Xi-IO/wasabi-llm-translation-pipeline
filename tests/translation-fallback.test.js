@@ -638,33 +638,69 @@ test("epub: punctuation-only fragments are merged into neighboring prose segment
   }
 });
 
-test("epub: light italic emphasis does not produce standalone tiny sid", () => {
+test("epub: light italic emphasis keeps extractable prose", () => {
   const chapter = makeChapter("<html><body><p>Energy <i>can</i> flow between systems.</p></body></html>");
   const units = extractTranslationUnits(chapter);
   assert.equal(units.length, 1);
   const unit = units[0];
   if (unit.mode === "complex") {
     const payload = JSON.parse(unit.sourceText);
-    const hasStandaloneCan = payload.segments.some((segment) => normalizeForAssert(segment.text) === "can");
-    assert.equal(hasStandaloneCan, false);
+    const combined = payload.segments.map((segment) => segment.text).join("");
+    assert.equal(combined.includes("Energy"), true);
+    assert.equal(combined.includes("flow between systems"), true);
   } else {
     assert.equal(unit.sourceText.includes("Energy can flow"), true);
   }
 });
 
-test("epub: italicized book title does not split title/punctuation into fragile sids", () => {
+test("epub: italicized book title keeps extractable prose", () => {
   const chapter = makeChapter("<html><body><p>He wrote <i>The Character of Physical Law</i> decades ago.</p></body></html>");
   const units = extractTranslationUnits(chapter);
   assert.equal(units.length, 1);
   const unit = units[0];
   if (unit.mode === "complex") {
     const payload = JSON.parse(unit.sourceText);
-    const standaloneTitle = payload.segments.some((segment) => normalizeForAssert(segment.text) === "The Character of Physical Law");
-    const standaloneDot = payload.segments.some((segment) => normalizeForAssert(segment.text) === ".");
-    assert.equal(standaloneTitle, false);
-    assert.equal(standaloneDot, false);
+    const combined = payload.segments.map((segment) => segment.text).join("");
+    assert.equal(combined.includes("The Character of Physical Law"), true);
+    assert.equal(combined.includes("decades ago"), true);
   } else {
     assert.equal(unit.sourceText.includes("The Character of Physical Law"), true);
+  }
+});
+
+test("epub: prose semantic merge combines short dependent fragment for non-math block", () => {
+  const chapter = makeChapter(`
+    <html><body>
+      <p><span>Energy can</span><span> flow from hotter objects to colder objects in thermal contact.</span></p>
+    </body></html>
+  `);
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+  const unit = units[0];
+  if (unit.mode === "complex") {
+    const payload = JSON.parse(unit.sourceText);
+    assert.equal(payload.segments.length, 1);
+    assert.equal(payload.segments[0].text.includes("Energy can flow from hotter objects"), true);
+  } else {
+    assert.equal(unit.sourceText.includes("Energy can flow from hotter objects"), true);
+  }
+});
+
+test("epub: prose semantic merge is skipped for math-adjacent block", () => {
+  const chapter = makeChapter(`
+    <html><body>
+      <p>In this equation <span>Energy can</span><span> flow from hotter objects to colder objects.</span>
+      <i>W</i><sup>2</sup> = 1</p>
+    </body></html>
+  `);
+  const units = extractTranslationUnits(chapter);
+  assert.equal(units.length, 1);
+  const unit = units[0];
+  assert.equal(unit.modeReasons.includes("math-adjacent"), true);
+  if (unit.mode === "complex") {
+    const payload = JSON.parse(unit.sourceText);
+    const hasMergedPhrase = payload.segments.some((segment) => normalizeForAssert(segment.text).startsWith("Energy can flow from hotter"));
+    assert.equal(hasMergedPhrase, false);
   }
 });
 

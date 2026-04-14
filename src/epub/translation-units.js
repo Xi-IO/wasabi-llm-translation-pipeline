@@ -215,10 +215,6 @@ function isInlineSymbolToken(text) {
   return /^[\p{P}\p{S}]+$/u.test(trimmed);
 }
 
-function isProseEmphasisTag(tagName) {
-  return tagName === "i" || tagName === "em" || tagName === "strong" || tagName === "b";
-}
-
 function isLikelyProseToken(text) {
   const trimmed = normalizeText(text);
   if (!trimmed) return false;
@@ -230,26 +226,105 @@ function isLikelyProseToken(text) {
 function shouldMergeSegment(prev, current) {
   if (!prev || !current) return false;
   const sameParent = !!prev.parentId && prev.parentId === current.parentId;
+  if (!sameParent) return false;
 
-  const adjacentSibling = sameParent
-    && typeof prev.lastSiblingIndex === "number"
+  const adjacentSibling = typeof prev.lastSiblingIndex === "number"
     && typeof current.siblingIndex === "number"
     && current.siblingIndex === prev.lastSiblingIndex + 1;
 
   if (adjacentSibling) return true;
 
-  const proseInlineBoundary = isProseEmphasisTag(prev.parentTag) || isProseEmphasisTag(current.parentTag);
-  if (proseInlineBoundary && isLikelyProseToken(prev.text) && isLikelyProseToken(current.text)) {
-    return true;
-  }
-
   const prevText = prev.text;
   const currentText = current.text;
-  return sameParent
-    && (isShortToken(prevText) || isShortToken(currentText) || isInlineSymbolToken(prevText) || isInlineSymbolToken(currentText));
+  return isShortToken(prevText) || isShortToken(currentText) || isInlineSymbolToken(prevText) || isInlineSymbolToken(currentText);
 }
 
-function buildSegmentPayload(textNodes) {
+function isSentenceEndingFragment(text) {
+  return /[.!?。！？;；:：]$/.test(normalizeText(text));
+}
+
+function looksDependentProseFragment(text) {
+  const trimmed = normalizeText(text);
+  if (!trimmed || trimmed.length > 20) return false;
+  if (!isLikelyProseToken(trimmed)) return false;
+  if (isSentenceEndingFragment(trimmed)) return false;
+  if (/[,，]$/.test(trimmed)) return true;
+  if (/\b(of|to|in|on|at|as|from|for|with|by|and|or|that|which|who|when|where)\b$/i.test(trimmed)) return true;
+  if (/^(as|in|on|at|for|from|with|to|if|when|while|because)\b/i.test(trimmed)) return true;
+  return true;
+}
+
+function mergeSemanticallyIncompleteProse(compacted) {
+  const merged = [];
+  let i = 0;
+  while (i < compacted.length) {
+    const current = compacted[i];
+    const next = compacted[i + 1];
+    if (
+      next
+      && current.parentId
+      && current.parentId === next.parentId
+      && looksDependentProseFragment(current.text)
+      && isLikelyProseToken(next.text)
+      && normalizeText(next.text).length >= 24
+    ) {
+      merged.push({
+        ...current,
+        text: `${current.text}${next.text}`,
+        nodeIds: [...current.nodeIds, ...next.nodeIds],
+        lastSiblingIndex: next.lastSiblingIndex,
+      });
+      i += 2;
+      continue;
+    }
+    merged.push(current);
+    i += 1;
+  }
+  return merged;
+}
+
+function hasEquationClass(node) {
+  if (!node || node.type !== "element") return false;
+  const classAttr = String(node.attrs?.class || "").toLowerCase();
+  return /\bequation\b/.test(classAttr);
+}
+
+function isMathAdjacentBlock(blockNode, textNodes) {
+  let hasMathTag = false;
+  let singleLetterItalicCount = 0;
+  let hasSupSub = false;
+  let hasSupSubClass = false;
+
+  function scan(node) {
+    if (!node) return;
+    if (node.type === "element") {
+      if (node.tagName === "sub" || node.tagName === "sup") hasSupSub = true;
+      if (node.tagName === "math" || node.tagName === "mrow" || node.tagName === "mi" || node.tagName === "mn") {
+        hasMathTag = true;
+      }
+      const classAttr = String(node.attrs?.class || "").toLowerCase();
+      if (/\bsub\b/.test(classAttr) || /\bsup\b/.test(classAttr)) hasSupSubClass = true;
+      if (node.tagName === "i" || node.tagName === "em") {
+        const inlineText = normalizeText((node.children || []).map((child) => String(child?.text || "")).join(""));
+        if (/^[A-Za-z]$/.test(inlineText)) singleLetterItalicCount += 1;
+      }
+    }
+    for (const child of node.children || []) scan(child);
+  }
+  scan(blockNode);
+
+  const joinedText = normalizeText(textNodes.map((item) => item.text).join(" "));
+  const hasFormulaWords = /(in this equation|denoted|proportional|constant|\blog\b|\bln\b|=)/i.test(joinedText);
+
+  const siblings = blockNode?.parent?.children || [];
+  const blockIdx = siblings.findIndex((node) => node?.id === blockNode?.id);
+  const previousSibling = blockIdx > 0 ? siblings[blockIdx - 1] : null;
+  const nearEquation = hasEquationClass(blockNode) || hasEquationClass(previousSibling);
+
+  return hasSupSub || hasSupSubClass || hasMathTag || singleLetterItalicCount >= 2 || hasFormulaWords || nearEquation;
+}
+
+function buildSegmentPayload(textNodes, { enableProseSemanticMerge = false } = {}) {
   const segmentMap = [];
   const grouped = [];
   for (const node of textNodes) {
@@ -281,8 +356,11 @@ function buildSegmentPayload(textNodes) {
     }
     compacted.push(group);
   }
+  const finalGroups = enableProseSemanticMerge
+    ? mergeSemanticallyIncompleteProse(compacted)
+    : compacted;
 
-  const segments = compacted.map((group, idx) => {
+  const segments = finalGroups.map((group, idx) => {
     const sid = `S${idx}`;
     segmentMap.push({ sid, nodeIds: group.nodeIds });
     return { sid, text: group.text || "" };
@@ -355,7 +433,10 @@ export function extractTranslationUnits(chapter, diagnostics = null) {
             incrementReason(stats.skippedReasons, "relaxed-block-complex");
             return;
           }
-          const { segmentPayload, segmentMap } = buildSegmentPayload(textNodes);
+          const mathAdjacent = isMathAdjacentBlock(node, textNodes);
+          const { segmentPayload, segmentMap } = buildSegmentPayload(textNodes, {
+            enableProseSemanticMerge: !mathAdjacent,
+          });
           const isSimple = classification.mode === "simple";
           units.push({
             key: `${chapter.entryName}::${node.id}`,
@@ -368,7 +449,7 @@ export function extractTranslationUnits(chapter, diagnostics = null) {
             blockNodeId: node.id,
             segmentMap: isSimple ? [] : segmentMap,
             mode: classification.mode,
-            modeReasons: classification.reasons,
+            modeReasons: mathAdjacent ? [...classification.reasons, "math-adjacent"] : classification.reasons,
           });
           if (classification.mode === "simple") stats.simpleUnits += 1;
           if (classification.mode === "complex") stats.complexUnits += 1;
