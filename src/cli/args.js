@@ -14,6 +14,7 @@ export function parseCliArgs(argv) {
     concurrency: CONFIG.translationConcurrency,
     chapterSelector: null,
     dryRun: false,
+    segmentDebug: false,
   };
   let input = null;
 
@@ -53,6 +54,10 @@ export function parseCliArgs(argv) {
       opts.dryRun = true;
       continue;
     }
+    if (token === "--segment") {
+      opts.segmentDebug = true;
+      continue;
+    }
     if (token.startsWith("--")) {
       throw new Error(`Unknown option: ${token}`);
     }
@@ -61,7 +66,7 @@ export function parseCliArgs(argv) {
   }
 
   if (!input) {
-    throw new Error("用法: node index.js <input_file> [--to zh-CN] [--from auto] [--concurrency 4] [--chap <selector>] [--dry-run] [--verbose-failures]");
+    throw new Error("用法: node index.js <input_file> [--to zh-CN] [--from auto] [--concurrency 4] [--chap <selector>] [--dry-run] [--segment] [--verbose-failures]");
   }
 
   opts.from = normalizeLangCode(opts.from, CONFIG.defaultSourceLanguage);

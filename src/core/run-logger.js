@@ -65,9 +65,10 @@ export async function createRunLogger({
   provider,
   model,
   baseDir = process.cwd(),
+  tempDir = null,
   verboseFailures = false,
 }) {
-  const logsDir = path.join(baseDir, "temp", "run-logs");
+  const logsDir = tempDir ? path.join(tempDir, "run-logs") : path.join(baseDir, "temp", "run-logs");
   await fs.mkdir(logsDir, { recursive: true });
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");

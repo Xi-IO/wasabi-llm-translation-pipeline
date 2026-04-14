@@ -13,6 +13,7 @@ import { collectTranslatableItems, applyTranslations } from "./src/subtitles/tra
 import { parseByFormat } from "./src/subtitles/format-dispatcher.js";
 import { translateAll } from "./src/core/translation.js";
 import { extractEpubItems, applyEpubTranslations, translateEpubItems } from "./src/adapters/epub/index.js";
+import { buildSrtTranslationCodecs } from "./src/adapters/subtitles/srt-json-codec.js";
 import { createRunLogger, preserveRunLogOnCrash } from "./src/core/run-logger.js";
 import {
   prepareWorkspace,
@@ -26,12 +27,16 @@ import { writeEpubDocument } from "./src/output/epub-writer.js";
 
 async function main() {
   const { input, opts: langOptions } = parseCliArgs(process.argv.slice(2));
+  if (langOptions.segmentDebug) {
+    process.env.EPUB_SEGMENT_DEBUG = "1";
+  }
   const workspace = await prepareWorkspace(input);
   const runSummary = {};
   const runLogger = await createRunLogger({
     inputFile: workspace.inputPath,
     provider: CONFIG.provider.provider,
     model: CONFIG.provider.model,
+    tempDir: workspace.tempDir,
     verboseFailures: langOptions.verboseFailures,
   });
   const unregisterCrashHooks = preserveRunLogOnCrash(runLogger);
@@ -93,7 +98,7 @@ async function main() {
         verboseFailures: runLogger.verboseFailures,
         runSummary,
       });
-      applyEpubTranslations(workingDoc, translationMap);
+      applyEpubTranslations(workingDoc, items, translationMap);
       writeEpubDocument(epubDoc, translatedPath);
 
       console.log(`翻译完成: ${translatedPath}`);
@@ -120,11 +125,14 @@ async function main() {
         throw new Error("没有找到可翻译的文本条目。");
       }
 
+      const subtitleSerializationOptions = format === "srt" ? buildSrtTranslationCodecs() : {};
+
       const translationMap = await translateAll(items, cachePath, langOptions, {
         concurrency: langOptions.concurrency,
         runLogger,
         verboseFailures: runLogger.verboseFailures,
         runSummary,
+        ...subtitleSerializationOptions,
       });
       const finalText = applyTranslations(format, parsed, translationMap);
 
